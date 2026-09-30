@@ -814,8 +814,9 @@ function NP.gather.SyncName(plateData, unit)
             and RAID_CLASS_COLORS[plateData._headlineClass]
         if cc then r, g, b = cc.r, cc.g, cc.b end
     end
+    local detachedLevel = showLevelPrefix and (cfg.levelPosition == "left" or cfg.levelPosition == "topleft")
     local displayName
-    if showLevelPrefix then
+    if showLevelPrefix and not detachedLevel then
         displayName = NP.discovery.FormatPlateName(plateData, levelUnit, fallbackLevel)
     else
         displayName = plateData.plateName or "?"
@@ -854,6 +855,31 @@ function NP.gather.SyncName(plateData, unit)
         plateData.minaName:SetText(displayName)
     end
     plateData.minaName:Show()
+
+    -- Detached level readout beside the bar (optional; otherwise baked into the name above).
+    local levelFS = plateData.minaLevel
+    if levelFS then
+        if detachedLevel then
+            local levelText, lr, lg, lb = NP.discovery.GetLevelDisplay(plateData, levelUnit, fallbackLevel)
+            if levelText then
+                if plateData._levelTextLast ~= levelText then
+                    plateData._levelTextLast = levelText
+                    levelFS:SetText(levelText)
+                end
+                if plateData._levelTextR ~= lr or plateData._levelTextG ~= lg or plateData._levelTextB ~= lb then
+                    plateData._levelTextR, plateData._levelTextG, plateData._levelTextB = lr, lg, lb
+                    levelFS:SetTextColor(lr, lg, lb)
+                end
+                levelFS:Show()
+            else
+                plateData._levelTextLast = nil
+                levelFS:Hide()
+            end
+        else
+            plateData._levelTextLast = nil
+            levelFS:Hide()
+        end
+    end
 
     if plateData.minaSubTitle then
         -- Cache subtitle even when headlineExcludeTarget; ready on un-target.

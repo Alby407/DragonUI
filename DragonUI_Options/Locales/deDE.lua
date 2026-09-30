@@ -1241,6 +1241,11 @@ L["Choose where the totem icon is anchored around the nameplate."] = "Legt fest,
 L["Debuffs"] = "Schwächungszauber"
 L["Layout"] = "Anordnung"
 L["Level Format"] = "Stufenformat"
+L["Level Position"] = "Stufenposition"
+L["Show the level inside the name, or detached left / top-left of the bar."] = "Zeigt die Stufe im Namen oder abgesetzt links / links oben an der Leiste."
+L["In the name"] = "Im Namen"
+L["Left of the bar"] = "Links neben der Leiste"
+L["Top left of the bar"] = "Links oben neben der Leiste"
 L["Totem Icon Position"] = "Position des Totemsymbols"
 L["Whitelist"] = "Positivliste"
 

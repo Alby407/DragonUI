@@ -146,8 +146,10 @@ function NP.discovery.GetPlateName(plateData)
     return plateData.plateName
 end
 
-function NP.discovery.FormatPlateName(plateData, unit, levelOverride)
-    local name = plateData.plateName or "?"
+-- Shared level resolution: display text (per levelTextFormat) plus difficulty
+-- color channels. Returns nil when there is no level or the boss skull takes
+-- its place, so detached and inline rendering agree on visibility.
+function NP.discovery.GetLevelDisplay(plateData, unit, levelOverride)
     local level, color
     if levelOverride ~= nil then
         level = levelOverride
@@ -167,11 +169,11 @@ function NP.discovery.FormatPlateName(plateData, unit, levelOverride)
         end
     end
     if not level then
-        return name
+        return nil
     end
     if NP.native_style.IsBossLevel(level) then
         -- Boss skull uses dedicated texture in gather/layout.
-        return name
+        return nil
     end
     local cfg = NP.config.GetCfg()
     local fmt = cfg.levelTextFormat or "brackets"
@@ -183,8 +185,17 @@ function NP.discovery.FormatPlateName(plateData, unit, levelOverride)
     else
         levelText = "[" .. tostring(level) .. "]"
     end
+    return levelText, color.r, color.g, color.b
+end
+
+function NP.discovery.FormatPlateName(plateData, unit, levelOverride)
+    local name = plateData.plateName or "?"
+    local levelText, r, g, b = NP.discovery.GetLevelDisplay(plateData, unit, levelOverride)
+    if not levelText then
+        return name
+    end
     return string.format("|cff%02x%02x%02x%s|r %s",
-        color.r * 255, color.g * 255, color.b * 255, levelText, name)
+        r * 255, g * 255, b * 255, levelText, name)
 end
 
 -- Bar builder helpers

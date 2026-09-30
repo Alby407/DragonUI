@@ -820,6 +820,7 @@ function NP.layout.ApplyNameplateFonts(plateData)
         return math.max(1, math.floor(px * unit + 0.5)) / unit
     end
     applyFont(plateData.minaName, snap(plateData.minaName, nameSize), textFlags)
+    applyFont(plateData.minaLevel, snap(plateData.minaLevel, nameSize), textFlags)
     applyFont(plateData.minaHpPct, snap(plateData.minaHpPct, nameSize), textFlags)
     applyFont(plateData.minaSubTitle, math.max(6, nameSize - 2))
     applyFont(plateData.minaHpNum, snap(plateData.minaHpNum, hpNumSize), textFlags)
@@ -1009,6 +1010,17 @@ function NP.layout.EnsureMinaStack(plateData)
     plateData.minaHpPct:SetWordWrap(false)
     plateData.minaHpPct:SetHeight(12)
 
+    -- Detached level readout (optional; anchored beside the bar in LayoutDetachedLevel).
+    plateData.minaLevel = visualRoot:CreateFontString(nil, "OVERLAY")
+    SafeSetFont(plateData.minaLevel, fontPath, nameSize, "")
+    plateData.minaLevel:SetShadowOffset(1, -1)
+    plateData.minaLevel:SetShadowColor(0, 0, 0, 1)
+    plateData.minaLevel:SetJustifyH("RIGHT")
+    plateData.minaLevel:SetNonSpaceWrap(false)
+    plateData.minaLevel:SetWordWrap(false)
+    plateData.minaLevel:SetHeight(12)
+    plateData.minaLevel:Hide()
+
     plateData.minaHpNum = visualRoot:CreateFontString(nil, "OVERLAY")
     SafeSetFont(plateData.minaHpNum, fontPath, 9, "")
     plateData.minaHpNum:SetShadowOffset(1, -1)
@@ -1091,6 +1103,25 @@ function NP.layout.GetNameOverlayIconY()
     local cfg = NP.config.GetCfg()
     local base = NP.config.IsNameOverlayBar() and (cfg.nameOverlayOffsetY or 0) or 14
     return base + (cfg.eliteIconOffsetY or 0)
+end
+
+-- Detached level readout anchor (optional; see cfg.levelPosition).
+-- Runs on every stack layout so bar resizes move it along.
+function NP.layout.LayoutDetachedLevel(plateData)
+    local fs = plateData.minaLevel
+    local hp = plateData.minaHp
+    if not fs or not hp then return end
+    local pos = NP.config.GetCfg().levelPosition or "name"
+    fs:ClearAllPoints()
+    if pos == "left" then
+        fs:SetJustifyH("RIGHT")
+        fs:SetPoint("RIGHT", hp, "LEFT", -4, 0)
+    elseif pos == "topleft" then
+        fs:SetJustifyH("RIGHT")
+        fs:SetPoint("BOTTOMRIGHT", hp, "TOPLEFT", -4, 2)
+    else
+        fs:Hide()
+    end
 end
 
 function NP.layout.LayoutMinaStack(plateData)
@@ -1185,6 +1216,7 @@ function NP.layout.LayoutMinaStack(plateData)
         plateData.minaBossSkull:SetPoint("LEFT", plateData.minaNameRow, "LEFT", 0, 0)
         plateData.minaBossSkull:Hide()
     end
+    NP.layout.LayoutDetachedLevel(plateData)
 
     if plateData.minaHpTextRow then
         plateData.minaHpTextRow:ClearAllPoints()
