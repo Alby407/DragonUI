@@ -909,13 +909,11 @@ local function BuildHealthSubTab(scroll)
     })
     C:AddDropdown(levelSection, {
         label = LO["Level Position"],
-        desc = LO["Show the level inside the name, or detached left / top-left of the bar."],
+        desc = LO["Show the level inside the name, or detached left of the bar."],
         dbPath = DB .. ".levelPosition",
         values = {
             name = LO["In the name"],
             left = LO["Left of the bar"],
-            topleft = LO["Top left of the bar"],
-            top = LO["Top of the bar"],
         },
         width = 220,
         callback = RefreshNameplates,
