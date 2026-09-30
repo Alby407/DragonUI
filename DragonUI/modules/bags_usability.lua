@@ -22,7 +22,7 @@ local CLASS_ARMOR = {
     DRUID = { cloth = true, leather = true },
     HUNTER = { cloth = true, leather = true, mail = 40 },
     SHAMAN = { cloth = true, leather = true, mail = 40 },
-    WARRIOR = { cloth = true, leather = true, mail = 40, plate = 40 },
+    WARRIOR = { cloth = true, leather = true, mail = true, plate = 40 },
     PALADIN = { cloth = true, leather = true, mail = true, plate = 40 },
     DEATHKNIGHT = { cloth = true, leather = true, mail = true, plate = true },
 }
@@ -211,6 +211,15 @@ end
 
 function addon:IsItemUnusableForTint(link, bag, slot)
     if not link then return false end
+
+    -- Trade Goods are materials, not "unusable" items
+    local itemType = select(6, GetItemInfo(link))
+    local tradeGoodsType = select(6, GetAuctionItemClasses())
+
+    if itemType == tradeGoodsType then
+        return false
+    end
+
     local itemID = link:match("item:(%d+)")
     if itemID and unusableTintCache[itemID] ~= nil then
         return unusableTintCache[itemID]
