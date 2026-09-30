@@ -915,6 +915,7 @@ local function BuildHealthSubTab(scroll)
             name = LO["In the name"],
             left = LO["Left of the bar"],
             topleft = LO["Top left of the bar"],
+            top = LO["Top of the bar"],
         },
         width = 220,
         callback = RefreshNameplates,

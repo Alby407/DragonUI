@@ -1001,7 +1001,7 @@ local defaults = {
                 showLevelOnHover = false, -- level on hover+target; false = target only
                 showLevelAlways = true, -- always show level bracket on any resolvable plate
                 levelTextFormat = "plain", -- "brackets" | "parentheses" | "plain"
-                levelPosition = "name", -- "name" | "left" | "topleft": detached level left / top-left of the bar
+                levelPosition = "name", -- "name" | "left" | "topleft" | "top": detached level position
                 nameReactionColors = false, -- tint name text with health-bar reaction color
                 enemyNameClassColors = false, -- class colors for enemy player name text
                 friendlyNameClassColors = false, -- class colors for friendly player name text (needs bar class options)

@@ -244,6 +244,7 @@ L["Show the level inside the name, or detached left / top-left of the bar."] = t
 L["In the name"] = true
 L["Left of the bar"] = true
 L["Top left of the bar"] = true
+L["Top of the bar"] = true
 L["Show Debuff Position Debug Box"] = true
 L["Displays a box showing where the debuff icon row starts and ends, even when no debuffs are active."] = true
 L["Shade Fill"] = true

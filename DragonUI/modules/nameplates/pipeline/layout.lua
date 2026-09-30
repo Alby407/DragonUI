@@ -1119,6 +1119,14 @@ function NP.layout.LayoutDetachedLevel(plateData)
     elseif pos == "topleft" then
         fs:SetJustifyH("RIGHT")
         fs:SetPoint("BOTTOMRIGHT", hp, "TOPLEFT", -4, 2)
+    elseif pos == "top" then
+        fs:SetJustifyH("CENTER")
+        if not NP.config.IsNameOverlayBar() and plateData.minaNameRow then
+            -- Name sits above the bar: stack the level on top of the name row.
+            fs:SetPoint("BOTTOM", plateData.minaNameRow, "TOP", 0, 2)
+        else
+            fs:SetPoint("BOTTOM", hp, "TOP", 0, 2)
+        end
     else
         fs:Hide()
     end

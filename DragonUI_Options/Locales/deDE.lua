@@ -1246,6 +1246,7 @@ L["Show the level inside the name, or detached left / top-left of the bar."] = "
 L["In the name"] = "Im Namen"
 L["Left of the bar"] = "Links neben der Leiste"
 L["Top left of the bar"] = "Links oben neben der Leiste"
+L["Top of the bar"] = "Über der Leiste"
 L["Totem Icon Position"] = "Position des Totemsymbols"
 L["Whitelist"] = "Positivliste"
 

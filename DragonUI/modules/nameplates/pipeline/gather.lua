@@ -814,7 +814,7 @@ function NP.gather.SyncName(plateData, unit)
             and RAID_CLASS_COLORS[plateData._headlineClass]
         if cc then r, g, b = cc.r, cc.g, cc.b end
     end
-    local detachedLevel = showLevelPrefix and (cfg.levelPosition == "left" or cfg.levelPosition == "topleft")
+    local detachedLevel = showLevelPrefix and (cfg.levelPosition == "left" or cfg.levelPosition == "topleft" or cfg.levelPosition == "top")
     local displayName
     if showLevelPrefix and not detachedLevel then
         displayName = NP.discovery.FormatPlateName(plateData, levelUnit, fallbackLevel)
