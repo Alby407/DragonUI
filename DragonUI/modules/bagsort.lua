@@ -65,14 +65,32 @@ end
 -- True only during an active guild bank sort; doesn't affect bag/bank sorting.
 local guildBankSortActive = false
 local GUILDBANK_MOVE_THROTTLE = 0.4
+-- 0.15s default: 3.3.5a (private) realms need time to release item locks
+-- and to replicate bag updates. 0.03 was too fast and produced false
+-- "Sort interrupted" aborts with a visually empty cursor.
+local DEFAULT_SORT_MOVE_INTERVAL = 0.15
+local MIN_SORT_MOVE_INTERVAL = 0.08
+-- How long a cursor mismatch is tolerated before treating it as a real
+-- external interruption. Covers the 1-2 frames where CursorHasItem() is
+-- already set but GetCursorInfo() has no link yet (and vice versa).
+local CURSOR_MISMATCH_TOLERANCE = 0.6
 
 local function GetSortMoveInterval()
     local cfg = GetModuleConfig()
-    local interval = cfg and tonumber(cfg.move_interval) or 0.1
+    local interval = cfg and tonumber(cfg.move_interval) or DEFAULT_SORT_MOVE_INTERVAL
+
+    -- 0.05 and 0.03 were old defaults that proved too fast (false
+    -- "item on cursor" aborts). Migrate those defaults to the safer
+    -- interval while preserving any custom value.
+    if cfg and (interval == 0.05 or interval == 0.03) then
+        interval = DEFAULT_SORT_MOVE_INTERVAL
+        cfg.move_interval = interval
+    end
+
     if guildBankSortActive and interval < GUILDBANK_MOVE_THROTTLE then
         interval = GUILDBANK_MOVE_THROTTLE
     end
-    if interval < 0.05 then return 0.05 end
+    if interval < MIN_SORT_MOVE_INTERVAL then return MIN_SORT_MOVE_INTERVAL end
     if interval > 0.5 then return 0.5 end
     return interval
 end
@@ -984,10 +1002,14 @@ end
 
 -- Build sort order from auction item classes
 local item_types, item_subtypes
+local weapon_type, armor_type
 local function BuildSortOrder()
     item_types = {}
     item_subtypes = {}
-    for i, itype in ipairs({ GetAuctionItemClasses() }) do
+    local auction_types = { GetAuctionItemClasses() }
+    weapon_type = auction_types[1]
+    armor_type = auction_types[2]
+    for i, itype in ipairs(auction_types) do
         item_types[itype] = i
         item_subtypes[itype] = {}
         for ii, istype in ipairs({ GetAuctionItemSubClasses(i) }) do
@@ -1021,6 +1043,13 @@ local function PrimeSort(a, b)
     else
         return a_level > b_level
     end
+end
+
+-- Gray items are sold via the sell button, so they live at the end of the bags.
+local function IsTrashItem(itemID)
+    if not itemID then return false end
+    local info = item_cache[itemID]
+    return (info ~= nil and info.rarity == 0) or false
 end
 
 -- Main sorting comparator (uses cache, never GetItemInfo)
@@ -1066,9 +1095,7 @@ local function DefaultSorter(a, b)
     -- Sort by item type
     if (item_types[a_type] or 99) == (item_types[b_type] or 99) then
         if a_rarity == b_rarity then
-            local weaponType = select(1, GetAuctionItemClasses())
-            local armorType = select(2, GetAuctionItemClasses())
-            if a_type == armorType or a_type == weaponType then
+            if a_type == armor_type or a_type == weapon_type then
                 local a_slot = EQUIP_SLOTS[a_equipLoc] or -1
                 local b_slot = EQUIP_SLOTS[b_equipLoc] or -1
                 if a_slot == b_slot then
@@ -1217,6 +1244,27 @@ local function SortItems(bags)
 
     table.sort(sources, DefaultSorter)
 
+    -- Trash to the end, rest stays front: split the sorted slots into
+    -- normal / empty / trash so gray items land on the last slots.
+    -- Empty slots in the middle keep trash pinned last as new loot arrives.
+    do
+        local normalS, trashS, emptyS = {}, {}, {}
+        for _, bs in ipairs(sources) do
+            local id = bag_ids[bs]
+            if not id then
+                tinsert(emptyS, bs)
+            elseif IsTrashItem(id) then
+                tinsert(trashS, bs)
+            else
+                tinsert(normalS, bs)
+            end
+        end
+        sources = {}
+        for _, bs in ipairs(normalS) do tinsert(sources, bs) end
+        for _, bs in ipairs(emptyS) do tinsert(sources, bs) end
+        for _, bs in ipairs(trashS) do tinsert(sources, bs) end
+    end
+
     -- When reverse_stack is enabled, items are placed at the end of each bag
     -- instead of the front. This leaves empty slots at the top of Bagster
     -- so new loot is immediately visible without scrolling.
@@ -1264,29 +1312,184 @@ end
 -- Move execution frame
 local moveFrame = CreateFrame("Frame")
 local moveTimer = 0
+local sortStallTime = 0
+local SORT_STALL_TIMEOUT = 8
 local current_id, current_target
+local current_source_bag, current_source_slot
+local current_displaced = false
+local current_displaced_id, current_target_itemid
+local current_target_count
+-- Transient cursor-state tolerance (see CURSOR_MISMATCH_TOLERANCE above).
+local cursorMismatchTime = 0
+local idleCursorTime = 0
 
-moveFrame:SetScript("OnUpdate", function(self, elapsed)
-    moveTimer = moveTimer + elapsed
-    if moveTimer < GetSortMoveInterval() then return end
-    moveTimer = 0
+local function CursorItemID()
+    if not CursorHasItem() then return nil end
+    local cursorType, _, cursorLink = GetCursorInfo()
+    -- Right after a Pickup the cursor flag can be set a frame before
+    -- GetCursorInfo() returns the link. Report "unknown" (false) instead
+    -- of nil so callers wait instead of aborting with a false mismatch.
+    if cursorLink == nil then return false end
+    if cursorType ~= nil and cursorType ~= "item" then return false end
+    local id = link_to_id(cursorLink)
+    if id == nil then return false end
+    return id
+end
 
-    -- Safety: check for unexpected cursor items
-    if CursorHasItem() then
-        local itemid = link_to_id(select(3, GetCursorInfo()))
-        if current_id ~= itemid then
-            StopSorting("DragonUI: Sort interrupted.")
-            return
-        end
+-- A swap is three pickups, not two: source -> cursor, target -> target
+-- (displacing the old target item), then cursor -> source.  The last step
+-- can need a retry while the client catches up with the bag update.
+local function ReturnDisplacedItem(dt)
+    if not current_displaced then return true end
+    if not CursorHasItem() then
+        current_displaced = false
+        cursorMismatchTime = 0
+        return true
     end
 
-    -- Wait for previous move to complete
-    if current_target and (link_to_id(BagGetItemLink(decode_bagslot(current_target))) ~= current_id) then
+    local cursorID = CursorItemID()
+    if cursorID == false then
+        -- Cursor flag set but link not readable yet: transient, wait.
+        return false
+    end
+    if current_displaced_id and cursorID ~= current_displaced_id then
+        -- Possible external cursor change, but GetCursorInfo() can lag one
+        -- frame behind CursorHasItem(). Only abort if it persists.
+        cursorMismatchTime = (cursorMismatchTime or 0) + (dt or 0)
+        if cursorMismatchTime < CURSOR_MISMATCH_TOLERANCE then
+            return false
+        end
+        StopSorting("DragonUI: Sort interrupted.")
+        return false
+    end
+    cursorMismatchTime = 0
+
+    if not current_source_bag or not current_source_slot then
+        return false
+    end
+
+    -- Do not click the source again until the first pickup has been reflected
+    -- locally; otherwise a delayed update could undo the move.
+    local _, _, source_locked = BagGetItemInfo(current_source_bag, current_source_slot)
+    if source_locked then return false end
+    if BagGetItemLink(current_source_bag, current_source_slot) then
+        return false
+    end
+
+    -- Clicking: respect pickup spacing.
+    if moveTimer < GetSortMoveInterval() then return false end
+    moveTimer = 0
+    BagPickupItem(current_source_bag, current_source_slot)
+    if CursorHasItem() then
+        return false
+    end
+
+    current_displaced = false
+    return true
+end
+
+moveFrame:SetScript("OnUpdate", function(self, elapsed)
+    sortStallTime = sortStallTime + elapsed
+    if sortStallTime >= SORT_STALL_TIMEOUT then
+        StopSorting("DragonUI: Sort timed out; please check the item cursor.")
         return
     end
 
-    current_id = nil
-    current_target = nil
+    moveTimer = moveTimer + elapsed
+    -- Two-tier timing: pure reads (locks, links, counts) poll every frame so
+    -- a confirmed move continues with minimal latency. Any tick that clicks
+    -- items (pickup/split) must still be spaced by the full interval, since
+    -- BAG_UPDATE can arrive before the server releases item locks.
+    local interval = GetSortMoveInterval()
+
+    -- Finish the previous move before starting another one.  If the target
+    -- was occupied, return its displaced item to the now-empty source slot.
+    if current_target then
+        local target_bag, target_slot = decode_bagslot(current_target)
+        if CursorHasItem() then
+            if current_displaced then
+                if not ReturnDisplacedItem(elapsed) then return end
+            else
+                local cursor_itemid = CursorItemID()
+                if cursor_itemid == false then
+                    -- Cursor flag set but link not readable yet: transient, retry next tick.
+                    cursorMismatchTime = 0
+                    return
+                end
+                if cursor_itemid ~= current_id then
+                    -- The target lookup may have raced the bag update. If the
+                    -- cursor contains the known old target item, finish the
+                    -- swap; otherwise this may be an external cursor change
+                    -- or a 1-frame API race, so tolerate it briefly.
+                    if current_target_itemid and cursor_itemid == current_target_itemid then
+                        current_displaced = true
+                        current_displaced_id = cursor_itemid
+                        cursorMismatchTime = 0
+                        if not ReturnDisplacedItem(elapsed) then return end
+                    else
+                        cursorMismatchTime = (cursorMismatchTime or 0) + elapsed
+                        if cursorMismatchTime < CURSOR_MISMATCH_TOLERANCE then
+                            return
+                        end
+                        StopSorting("DragonUI: Sort interrupted.")
+                        return
+                    end
+                else
+                    cursorMismatchTime = 0
+                    -- The source item is still on the cursor, so retry placing
+                    -- it into an empty target while the bag API catches up.
+                    local _, _, target_locked = BagGetItemInfo(target_bag, target_slot)
+                    if target_locked then return end
+                    -- Clicking: respect pickup spacing.
+                    if moveTimer < interval then return end
+                    moveTimer = 0
+                    BagPickupItem(target_bag, target_slot)
+                    if CursorHasItem() then return end
+                end
+            end
+        end
+
+        if CursorHasItem() then
+            return
+        end
+
+        -- Wait for the complete destination update before allowing another
+        -- move. The count check matters for partial-stack moves where the
+        -- item link stays unchanged.
+        local _, _, source_locked = BagGetItemInfo(current_source_bag, current_source_slot)
+        local _, confirmed_target_count, target_locked = BagGetItemInfo(target_bag, target_slot)
+        if source_locked or target_locked
+            or link_to_id(BagGetItemLink(target_bag, target_slot)) ~= current_id
+            or (current_target_count and confirmed_target_count ~= current_target_count)
+        then
+            return
+        end
+
+        current_id = nil
+        current_target = nil
+        current_source_bag = nil
+        current_source_slot = nil
+        current_displaced = false
+        current_displaced_id = nil
+        current_target_itemid = nil
+        current_target_count = nil
+        sortStallTime = 0
+        cursorMismatchTime = 0
+        idleCursorTime = 0
+    elseif CursorHasItem() then
+        -- There is no active move that could own this cursor item. This can
+        -- still be a 1-frame race (cursor flag set before GetCursorInfo, or
+        -- a stale flag right after a place). Wait briefly instead of
+        -- aborting with a false "item on cursor".
+        idleCursorTime = (idleCursorTime or 0) + elapsed
+        if idleCursorTime < CURSOR_MISMATCH_TOLERANCE then
+            return
+        end
+        StopSorting("DragonUI: Sort interrupted.")
+        return
+    else
+        idleCursorTime = 0
+    end
 
     if #moves > 0 then
         for i = #moves, 1, -1 do
@@ -1299,6 +1502,10 @@ moveFrame:SetScript("OnUpdate", function(self, elapsed)
 
             if source_locked or target_locked then return end
 
+            -- Clicking: respect pickup spacing (the lock reads above poll every frame).
+            if moveTimer < interval then return end
+            moveTimer = 0
+
             tremove(moves, i)
             local source_link = BagGetItemLink(source_bag, source_slot)
             local source_itemid = link_to_id(source_link)
@@ -1307,12 +1514,26 @@ moveFrame:SetScript("OnUpdate", function(self, elapsed)
                 return
             end
 
-            local stack_size = select(8, GetItemInfo(source_itemid)) or 1
+            local stack_size = bag_maxstacks[encode_bagslot(source_bag, source_slot)] or select(8, GetItemInfo(source_itemid)) or 1
+            if stack_size < 1 then stack_size = 1 end
             current_target = target
             current_id = source_itemid
+            current_source_bag = source_bag
+            current_source_slot = source_slot
+            current_displaced = false
+            current_displaced_id = nil
+            cursorMismatchTime = 0
+            idleCursorTime = 0
+            sortStallTime = 0
 
             local target_link = BagGetItemLink(target_bag, target_slot)
             local target_itemid = link_to_id(target_link)
+            current_target_itemid = target_itemid
+            if target_itemid == source_itemid then
+                current_target_count = math.min(stack_size, (target_count or 0) + (source_count or 0))
+            else
+                current_target_count = source_count or 0
+            end
 
             if (source_itemid == target_itemid) and target_count and (target_count ~= stack_size) and ((target_count + (source_count or 0)) > stack_size) then
                 BagSplitItem(source_bag, source_slot, stack_size - target_count)
@@ -1323,8 +1544,44 @@ moveFrame:SetScript("OnUpdate", function(self, elapsed)
             if CursorHasItem() or isGuildBankMove then
                 BagPickupItem(target_bag, target_slot)
             end
+
+            -- If target was occupied, the second pickup leaves that old item
+            -- on the cursor. Return it to source to complete the swap.
+            if CursorHasItem() then
+                local cursor_itemid = CursorItemID()
+                if cursor_itemid == false then
+                    -- Link not readable yet this tick; retry next tick.
+                    return
+                end
+                -- A stack merge holds the same item id on cursor; that is a
+                -- retry, never a displaced swap item.
+                current_displaced = target_itemid ~= nil and target_itemid ~= source_itemid and cursor_itemid == target_itemid
+                if current_displaced then
+                    current_displaced_id = target_itemid
+                    cursorMismatchTime = 0
+                    if not ReturnDisplacedItem(elapsed) then return end
+                elseif not isGuildBankMove then
+                    if cursor_itemid ~= current_id then
+                        cursorMismatchTime = (cursorMismatchTime or 0) + elapsed
+                        if cursorMismatchTime < CURSOR_MISMATCH_TOLERANCE then
+                            return
+                        end
+                        StopSorting("DragonUI: Sort interrupted.")
+                        return
+                    end
+                    cursorMismatchTime = 0
+                    -- Target was empty but the source item is still held;
+                    -- leave it for the retry path at the next tick.
+                    return
+                end
+            end
+
             -- One guild-bank move per tick: state doesn't update predictively like bags.
             if isGuildBankMove then return end
+
+            -- Never start a second move until this move's destination has
+            -- been confirmed on a later update tick.
+            return
         end
     end
 
@@ -1338,6 +1595,16 @@ StopSorting = function(message)
     guildBankSortActive = false
     current_id = nil
     current_target = nil
+    current_source_bag = nil
+    current_source_slot = nil
+    current_displaced = false
+    current_displaced_id = nil
+    current_target_itemid = nil
+    current_target_count = nil
+    sortStallTime = 0
+    cursorMismatchTime = 0
+    idleCursorTime = 0
+    moveTimer = 0
     wipe(moves)
     moveFrame:Hide()
     if message then
@@ -1346,6 +1613,11 @@ StopSorting = function(message)
 end
 
 local function StartSorting()
+    -- There is no previous move to protect on the first tick.
+    moveTimer = GetSortMoveInterval()
+    sortStallTime = 0
+    cursorMismatchTime = 0
+    idleCursorTime = 0
     wipe(bag_maxstacks)
     wipe(bag_stacks)
     wipe(bag_ids)
@@ -1361,11 +1633,18 @@ end
 -- PUBLIC SORT FUNCTIONS
 -- ============================================================================
 
+local function SortCursorIsOccupied()
+    if not CursorHasItem() then return false end
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("Put away the item on your cursor before sorting.", "Put away the item on your cursor before sorting."), 1, 0.8, 0)
+    return true
+end
+
 local function SortPlayerBags()
     if running then
         DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("Sort already in progress.", "Sort already in progress."), 1, 0.8, 0)
         return
     end
+    if SortCursorIsOccupied() then return end
 
     ScanBags(ALL_BAGS)
     CompressAndSortBagGroups(PLAYER_BAGS)
@@ -1381,6 +1660,7 @@ local function SortBankBags()
         DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("Sort already in progress.", "Sort already in progress."), 1, 0.8, 0)
         return
     end
+    if SortCursorIsOccupied() then return end
     if not bank_open then
         DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("You must be at the bank.", "You must be at the bank."), 1, 0.4, 0.4)
         return
@@ -1446,6 +1726,7 @@ local function PerformGuildBankSort()
         DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("Sort already in progress.", "Sort already in progress."), 1, 0.8, 0)
         return
     end
+    if SortCursorIsOccupied() then return end
     if not guild_bank_open then
         DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("You must be at the guild bank.", "You must be at the guild bank."), 1, 0.4, 0.4)
         return
