@@ -67,14 +67,32 @@ end
 -- True only during an active guild bank sort; doesn't affect bag/bank sorting.
 local guildBankSortActive = false
 local GUILDBANK_MOVE_THROTTLE = 0.4
+-- 0.15s default: 3.3.5a (private) realms need time to release item locks
+-- and to replicate bag updates. 0.03 was too fast and produced false
+-- "Sort interrupted" aborts with a visually empty cursor.
+local DEFAULT_SORT_MOVE_INTERVAL = 0.15
+local MIN_SORT_MOVE_INTERVAL = 0.08
+-- How long a cursor mismatch is tolerated before treating it as a real
+-- external interruption. Covers the 1-2 frames where CursorHasItem() is
+-- already set but GetCursorInfo() has no link yet (and vice versa).
+local CURSOR_MISMATCH_TOLERANCE = 0.6
 
 local function GetSortMoveInterval()
     local cfg = GetModuleConfig()
-    local interval = cfg and tonumber(cfg.move_interval) or 0.1
+    local interval = cfg and tonumber(cfg.move_interval) or DEFAULT_SORT_MOVE_INTERVAL
+
+    -- 0.05 and 0.03 were old defaults that proved too fast (false
+    -- "item on cursor" aborts). Migrate those defaults to the safer
+    -- interval while preserving any custom value.
+    if cfg and (interval == 0.05 or interval == 0.03) then
+        interval = DEFAULT_SORT_MOVE_INTERVAL
+        cfg.move_interval = interval
+    end
+
     if guildBankSortActive and interval < GUILDBANK_MOVE_THROTTLE then
         interval = GUILDBANK_MOVE_THROTTLE
     end
-    if interval < 0.05 then return 0.05 end
+    if interval < MIN_SORT_MOVE_INTERVAL then return MIN_SORT_MOVE_INTERVAL end
     if interval > 0.5 then return 0.5 end
     return interval
 end
@@ -195,13 +213,35 @@ local function GetBagnonFrame(frameType)
     return nil
 end
 
--- Bag, bank and guild-tab sorts share this flag, the move plan and the tick driver: one sort at a time.
-local running = false
-local plannedMoves = {}
-local nextMoveIndex = 1
-local awaitedDrop
-local tickAccumulator = 0
+-- ============================================================================
+-- SORTING ENGINE
+-- ============================================================================
 
+-- Bag group definitions
+local PLAYER_BAGS = {}
+for i = 0, NUM_BAG_SLOTS do
+    tinsert(PLAYER_BAGS, i)
+end
+tinsert(PLAYER_BAGS, KEYRING_CONTAINER)
+
+local BANK_BAGS = { BANK_CONTAINER }
+for i = NUM_BAG_SLOTS + 1, NUM_BAG_SLOTS + NUM_BANKBAGSLOTS do
+    tinsert(BANK_BAGS, i)
+end
+
+local ALL_BAGS = { BANK_CONTAINER }
+for i = 0, NUM_BAG_SLOTS + NUM_BANKBAGSLOTS do
+    tinsert(ALL_BAGS, i)
+end
+tinsert(ALL_BAGS, KEYRING_CONTAINER)
+
+-- Internal caches
+local bag_ids = {}
+local bag_stacks = {}
+local bag_maxstacks = {}
+local item_cache = {}  -- keyed by itemID, stores GetItemInfo results
+local moves = {}
+local running = false
 local bank_open = false
 local guild_bank_open = false
 local guildBankTabHookInstalled = false
@@ -221,9 +261,19 @@ local bagnonOriginalMove
 local StopSorting
 local UpdateButtonVisibility
 
-local function ItemIDFromLink(link)
-    local digits = link and string.match(link, "item:(%d+)")
-    return digits and tonumber(digits)
+-- Encoding helpers
+local function encode_bagslot(bag, slot) return (bag * 100) + slot end
+local function decode_bagslot(int) return math.floor(int / 100), int % 100 end
+local function encode_move(source, target) return (source * 10000) + target end
+local function decode_move(move)
+    local s = math.floor(move / 10000)
+    local t = move % 10000
+    s = (t > 9000) and (s + 1) or s
+    t = (t > 9000) and (t - 10000) or t
+    return s, t
+end
+local function link_to_id(link)
+    return link and tonumber(string.match(link, "item:(%d+)"))
 end
 
 local function GetLockedSlotsTable()
@@ -872,120 +922,49 @@ local function BagSplitItem(bag, slot, amount)
     return SplitContainerItem(bag, slot, amount)
 end
 
--- Pairs of inclusive (first, last) bag id spans, flattened in the order given.
-local function ListBags(...)
-    local bags = {}
-    for i = 1, select("#", ...), 2 do
-        local first, last = select(i, ...)
-        for bag = first, last do
-            bags[#bags + 1] = bag
+-- Bag iteration
+local function IterateBags(baglist)
+    local items = {}
+    for _, bag in ipairs(baglist) do
+        local numSlots = IsGuildBankBag(bag) and GetGuildBankTabSlotCount(bag - GUILDBANK_TAB_OFFSET) or GetContainerNumSlots(bag)
+        for slot = 1, numSlots do
+            tinsert(items, { bag = bag, slot = slot, bagslot = encode_bagslot(bag, slot) })
         end
     end
-    return bags
-end
-
-local carriedBags = ListBags(0, 4)
-local playerPoolBags = ListBags(0, 4, -2, -2)
-local bankPoolBags = ListBags(-1, -1, 5, 11)
-local personalBags = ListBags(-1, 11, -2, -2)
-
-local SOUL_SHARD_ID = 6265
-local UNRANKED = 99
-
-local classRankByName, subclassRankByClass, weaponClassName, armorClassName
-
--- A repeated name ends up with its last position.
-local function PositionsByName(...)
-    local positions = {}
-    for index = 1, select("#", ...) do
-        local value = select(index, ...)
-        if value ~= nil then
-            positions[value] = index
+    local i = 0
+    return function()
+        i = i + 1
+        if items[i] then
+            return items[i].bag, items[i].slot, items[i].bagslot
         end
     end
-    return positions
 end
 
-local function LoadAuctionRanks()
-    if classRankByName then return end
-    classRankByName = PositionsByName(GetAuctionItemClasses())
-    subclassRankByClass = {}
-    for _, rank in pairs(classRankByName) do
-        subclassRankByClass[rank] = PositionsByName(GetAuctionItemSubClasses(rank))
-    end
-    weaponClassName, armorClassName = GetAuctionItemClasses()
-end
-
--- Only the relative order matters; unlisted equip locations rank below all of these.
-local gearRankByEquipLoc = {}
-for rank, group in ipairs({
-    "AMMO", "HEAD", "NECK", "SHOULDER", "BODY", "CHEST ROBE", "WAIST", "LEGS", "FEET", "WRIST", "HAND",
-    "FINGER", "TRINKET", "CLOAK", "WEAPON", "SHIELD", "2HWEAPON", "WEAPONMAINHAND", "WEAPONOFFHAND",
-    "HOLDABLE", "RANGED", "THROWN", "RANGEDRIGHT", "RELIC", "TABARD",
-}) do
-    for suffix in string.gmatch(group, "%S+") do
-        gearRankByEquipLoc["INVTYPE_" .. suffix] = rank
-    end
-end
-
-local itemFacts = {}
-local slotGrid = {}
-
-local function LearnItem(itemID)
-    local facts = itemFacts[itemID]
-    if facts then return facts end
-    LoadAuctionRanks()
-    local name, _, quality, level, _, class, subclass, stack, equipLoc = GetItemInfo(itemID)
-    facts = {
-        name = name or "",
-        quality = quality or 0,
-        level = level or 0,
-        class = class or "",
-        subclass = subclass or "",
-        stack = stack or 1,
-        equipLoc = equipLoc or "",
-    }
-    local classRank = classRankByName[facts.class] or UNRANKED
-    local siblings = subclassRankByClass[classRank]
-    facts.classRank = classRank
-    facts.subclassRank = siblings and siblings[facts.subclass] or UNRANKED
-    facts.isGear = facts.class == weaponClassName or facts.class == armorClassName
-    facts.gearRank = gearRankByEquipLoc[facts.equipLoc] or 0
-    itemFacts[itemID] = facts
-    return facts
-end
-
-local function BagSlotCount(bag)
-    if IsGuildBankBag(bag) then
-        return GetGuildBankTabSlotCount(bag - GUILDBANK_TAB_OFFSET)
-    end
-    return GetContainerNumSlots(bag) or 0
-end
-
--- Sort locks are read here only; a lock toggled mid-sort applies to the next sort.
-local function CaptureBags(bags)
-    wipe(slotGrid)
-    wipe(itemFacts)
-    for _, bag in ipairs(bags) do
-        local column = {}
-        for slot = 1, BagSlotCount(bag) do
-            local cell = { bag = bag, slot = slot, pinned = IsSlotLocked(bag, slot) }
-            local itemID = ItemIDFromLink(BagGetItemLink(bag, slot))
-            if itemID then
-                local _, count = BagGetItemInfo(bag, slot)
-                cell.item = itemID
-                cell.qty = count or 0
-                cell.cap = LearnItem(itemID).stack
+-- Scan all items in given bags into cache
+local function ScanBags(bags)
+    for bag, slot, bagslot in IterateBags(bags) do
+        local itemLink = BagGetItemLink(bag, slot)
+        local itemid = link_to_id(itemLink)
+        if itemid then
+            bag_ids[bagslot] = itemid
+            local _, count = BagGetItemInfo(bag, slot)
+            bag_stacks[bagslot] = count or 0
+            -- Cache GetItemInfo by itemID (not bagslot) so it's stable
+            if not item_cache[itemid] then
+                local name, _, rarity, level, _, itype, subType, maxStack, equipLoc = GetItemInfo(itemid)
+                item_cache[itemid] = {
+                    name = name or "",
+                    rarity = rarity or 0,
+                    level = level or 0,
+                    itype = itype or "",
+                    subType = subType or "",
+                    maxStack = maxStack or 1,
+                    equipLoc = equipLoc or "",
+                }
             end
-            column[slot] = cell
+            bag_maxstacks[bagslot] = item_cache[itemid].maxStack
         end
-        slotGrid[bag] = column
     end
-end
-
-local function ReleaseSnapshot()
-    wipe(slotGrid)
-    wipe(itemFacts)
 end
 
 -- Bag family (0 = normal). Specialty bags (herb/enchant/…) sort in their own pool.
@@ -1023,348 +1002,765 @@ local function GroupBagsByFamily(bags)
     return families, groups
 end
 
-local SORT_CHAT_PREFIX = "|cff00cc66DragonUI:|r "
-
-local function Notify(key, r, g, b)
-    DEFAULT_CHAT_FRAME:AddMessage(SORT_CHAT_PREFIX .. T(key, key), r, g, b)
+-- Build sort order from auction item classes
+local item_types, item_subtypes
+local weapon_type, armor_type
+local function BuildSortOrder()
+    item_types = {}
+    item_subtypes = {}
+    local auction_types = { GetAuctionItemClasses() }
+    weapon_type = auction_types[1]
+    armor_type = auction_types[2]
+    for i, itype in ipairs(auction_types) do
+        item_types[itype] = i
+        item_subtypes[itype] = {}
+        for ii, istype in ipairs({ GetAuctionItemSubClasses(i) }) do
+            item_subtypes[itype][istype] = ii
+        end
+    end
 end
 
-local function ResetPlan()
-    wipe(plannedMoves)
-    nextMoveIndex = 1
+-- Equipment slot sort order
+local EQUIP_SLOTS = {
+    INVTYPE_AMMO = 0, INVTYPE_HEAD = 1, INVTYPE_NECK = 2, INVTYPE_SHOULDER = 3,
+    INVTYPE_BODY = 4, INVTYPE_CHEST = 5, INVTYPE_ROBE = 5, INVTYPE_WAIST = 6,
+    INVTYPE_LEGS = 7, INVTYPE_FEET = 8, INVTYPE_WRIST = 9, INVTYPE_HAND = 10,
+    INVTYPE_FINGER = 11, INVTYPE_TRINKET = 12, INVTYPE_CLOAK = 13,
+    INVTYPE_WEAPON = 14, INVTYPE_SHIELD = 15, INVTYPE_2HWEAPON = 16,
+    INVTYPE_WEAPONMAINHAND = 18, INVTYPE_WEAPONOFFHAND = 19, INVTYPE_HOLDABLE = 20,
+    INVTYPE_RANGED = 21, INVTYPE_THROWN = 22, INVTYPE_RANGEDRIGHT = 23,
+    INVTYPE_RELIC = 24, INVTYPE_TABARD = 25,
+}
+
+-- Primary sort tiebreaker: level then name (uses cache, never GetItemInfo)
+local function PrimeSort(a, b)
+    local a_info = item_cache[bag_ids[a]]
+    local b_info = item_cache[bag_ids[b]]
+    local a_level = a_info and a_info.level or 0
+    local b_level = b_info and b_info.level or 0
+    if a_level == b_level then
+        local a_name = a_info and a_info.name or ""
+        local b_name = b_info and b_info.name or ""
+        return a_name < b_name
+    else
+        return a_level > b_level
+    end
 end
 
--- Mirrors what the executor's drop does: a merge tops the target up and leaves the rest behind.
-local function QueueMove(from, to)
-    if from.item and from.item == to.item and to.qty < to.cap then
-        local total = from.qty + to.qty
-        if total > to.cap then
-            from.qty, to.qty = total - to.cap, to.cap
+-- Gray items are sold via the sell button, so they live at the end of the bags.
+local function IsTrashItem(itemID)
+    if not itemID then return false end
+    local info = item_cache[itemID]
+    return (info ~= nil and info.rarity == 0) or false
+end
+
+-- Main sorting comparator (uses cache, never GetItemInfo)
+local function DefaultSorter(a, b)
+    local a_id = bag_ids[a]
+    local b_id = bag_ids[b]
+
+    -- Empty slots to back
+    if (not a_id) or (not b_id) then return a_id end
+
+    -- Same item: sort by stack count
+    if a_id == b_id then
+        local a_count = bag_stacks[a]
+        local b_count = bag_stacks[b]
+        if a_count == b_count then
+            return a < b
         else
-            to.qty = total
-            from.item, from.qty, from.cap = nil, nil, nil
+            return a_count < b_count
+        end
+    end
+
+    local a_info = item_cache[a_id]
+    local b_info = item_cache[b_id]
+    local a_rarity = a_info and a_info.rarity or 0
+    local b_rarity = b_info and b_info.rarity or 0
+    local a_type = a_info and a_info.itype or ""
+    local b_type = b_info and b_info.itype or ""
+    local a_subType = a_info and a_info.subType or ""
+    local b_subType = b_info and b_info.subType or ""
+    local a_equipLoc = a_info and a_info.equipLoc or ""
+    local b_equipLoc = b_info and b_info.equipLoc or ""
+
+    -- Junk (gray) to back
+    if not (a_rarity == b_rarity) then
+        if a_rarity == 0 then return false end
+        if b_rarity == 0 then return true end
+    end
+
+    -- Soul shards to back
+    if a_id == 6265 then return false end
+    if b_id == 6265 then return true end
+
+    -- Sort by item type
+    if (item_types[a_type] or 99) == (item_types[b_type] or 99) then
+        if a_rarity == b_rarity then
+            if a_type == armor_type or a_type == weapon_type then
+                local a_slot = EQUIP_SLOTS[a_equipLoc] or -1
+                local b_slot = EQUIP_SLOTS[b_equipLoc] or -1
+                if a_slot == b_slot then
+                    return PrimeSort(a, b)
+                else
+                    return a_slot < b_slot
+                end
+            else
+                if a_subType == b_subType then
+                    return PrimeSort(a, b)
+                else
+                    return ((item_subtypes[a_type] or {})[a_subType] or 99) < ((item_subtypes[b_type] or {})[b_subType] or 99)
+                end
+            end
+        else
+            return a_rarity > b_rarity
         end
     else
-        from.item, to.item = to.item, from.item
-        from.qty, to.qty = to.qty, from.qty
-        from.cap, to.cap = to.cap, from.cap
-    end
-    plannedMoves[#plannedMoves + 1] = { fromBag = from.bag, fromSlot = from.slot, toBag = to.bag, toSlot = to.slot }
-end
-
-local function UnlockedCells(bags)
-    local cells = {}
-    for _, bag in ipairs(bags) do
-        local column = slotGrid[bag]
-        if column then
-            for slot = 1, #column do
-                local cell = column[slot]
-                if not cell.pinned then
-                    cells[#cells + 1] = cell
-                end
-            end
-        end
-    end
-    return cells
-end
-
-local function CopyList(list, backwards)
-    local copy, size = {}, #list
-    for i = 1, size do
-        copy[i] = list[backwards and (size + 1 - i) or i]
-    end
-    return copy
-end
-
-local function TopUpStacks(donorBags, receiverBags, fullDonorsAllowed)
-    local openStacks = {}
-    for _, cell in ipairs(UnlockedCells(receiverBags)) do
-        if cell.qty ~= cell.cap then
-            openStacks[#openStacks + 1] = cell
-        end
-    end
-    local receiversLastFirst = CopyList(openStacks, true)
-    local gaveAway = {}
-    for _, donor in ipairs(CopyList(UnlockedCells(donorBags), true)) do
-        if donor.item and (fullDonorsAllowed or donor.qty < donor.cap) then
-            for _, receiver in ipairs(receiversLastFirst) do
-                if donor.item and receiver.item == donor.item and receiver ~= donor
-                    and receiver.qty ~= receiver.cap and not gaveAway[receiver] then
-                    gaveAway[donor] = true
-                    QueueMove(donor, receiver)
-                end
-            end
-        end
+        return (item_types[a_type] or 99) < (item_types[b_type] or 99)
     end
 end
 
--- Not a strict weak order (unranked classes, equal names, empties); table.sort's pass order decides those.
-local function ComesBefore(a, b)
-    local itemA, itemB = a.item, b.item
-    if not itemB then return itemA ~= nil end
-    if not itemA then return false end
-    if itemA == itemB then
-        if a.qty ~= b.qty then return a.qty < b.qty end
-        if a.bag ~= b.bag then return a.bag < b.bag end
-        return a.slot < b.slot
-    end
-    local fa, fb = itemFacts[itemA], itemFacts[itemB]
-    if fa.quality ~= fb.quality then
-        if fa.quality == 0 then return false end
-        if fb.quality == 0 then return true end
-    end
-    if itemA == SOUL_SHARD_ID then return false end
-    if itemB == SOUL_SHARD_ID then return true end
-    if fa.classRank ~= fb.classRank then return fa.classRank < fb.classRank end
-    if fa.quality ~= fb.quality then return fa.quality > fb.quality end
-    if fa.isGear then
-        if fa.gearRank ~= fb.gearRank then return fa.gearRank < fb.gearRank end
-    elseif fa.subclass ~= fb.subclass then
-        return fa.subclassRank < fb.subclassRank
-    end
-    if fa.level ~= fb.level then return fa.level > fb.level end
-    return fa.name < fb.name
-end
-
-local function ReverseStackEnabled()
-    local cfg = GetModuleConfig()
-    return cfg and cfg.reverse_stack
-end
-
--- Moves planned in one round touch disjoint slots, so the executor can issue them in a single tick.
-local function ArrangePool(bags)
-    local order = UnlockedCells(bags)
-    local total = #order
-    local homes = CopyList(order, ReverseStackEnabled())
-    table.sort(order, ComesBefore)
-
-    local positionOf = {}
-    for i = 1, total do
-        positionOf[order[i]] = i
-    end
-
-    local busy = {}
-    local deferred = true
-    while deferred do
-        deferred = false
-        wipe(busy)
-        for i = 1, total do
-            local holder, home = order[i], homes[i]
-            local needed = holder ~= home and holder.item
-                and not (holder.item == home.item and holder.qty == home.qty)
-            if needed and (busy[holder] or busy[home]) then
-                deferred = true
-            elseif needed then
-                busy[holder], busy[home] = true, true
-                QueueMove(holder, home)
-                local displaced = positionOf[home]
-                order[displaced], positionOf[holder] = holder, displaced
-                order[i], positionOf[home] = home, i
-            end
-        end
-    end
-end
-
-local function PlanFamilyPools(candidates)
-    local familyOrder, bagsByFamily = GroupBagsByFamily(candidates)
-    for _, family in ipairs(familyOrder) do
-        local poolBags = bagsByFamily[family]
-        TopUpStacks(poolBags, poolBags, false)
-        ArrangePool(poolBags)
-    end
-end
-
-local tickDriver = CreateFrame("Frame")
-tickDriver:Hide()
-
-StopSorting = function(reason)
-    running = false
-    guildBankSortActive = false
-    awaitedDrop = nil
-    ResetPlan()
-    tickDriver:Hide()
-    if reason then
-        DEFAULT_CHAT_FRAME:AddMessage(reason, 1, 0.4, 0.4)
-    end
-end
-
-local function IsSlotBusy(bag, slot)
-    local _, _, busy = BagGetItemInfo(bag, slot)
-    return busy
-end
-
-local function IssueNextMoves()
-    if CursorHasItem() then
-        local _, _, cursorLink = GetCursorInfo()
-        if ItemIDFromLink(cursorLink) ~= (awaitedDrop and awaitedDrop.item) then
-            StopSorting("DragonUI: Sort interrupted.")
-            return
-        end
-    end
-    if awaitedDrop then
-        if ItemIDFromLink(BagGetItemLink(awaitedDrop.bag, awaitedDrop.slot)) ~= awaitedDrop.item then
-            return
-        end
-        awaitedDrop = nil
-    end
-
-    while nextMoveIndex <= #plannedMoves do
-        if CursorHasItem() then return end
-        local move = plannedMoves[nextMoveIndex]
-        local fromBag, fromSlot, toBag, toSlot = move.fromBag, move.fromSlot, move.toBag, move.toSlot
-        if IsSlotBusy(fromBag, fromSlot) or IsSlotBusy(toBag, toSlot) then return end
-        nextMoveIndex = nextMoveIndex + 1
-
-        local sourceLink = BagGetItemLink(fromBag, fromSlot)
-        if not sourceLink then
-            StopSorting("DragonUI: Sort confused, stopping.")
-            return
-        end
-        local itemID = ItemIDFromLink(sourceLink)
-        awaitedDrop = { bag = toBag, slot = toSlot, item = itemID }
-        local stackLimit = itemID and select(8, GetItemInfo(itemID)) or 1
-
-        local _, targetCount = BagGetItemInfo(toBag, toSlot)
-        local _, sourceCount = BagGetItemInfo(fromBag, fromSlot)
-        local sameItem = ItemIDFromLink(BagGetItemLink(toBag, toSlot)) == itemID
-        -- Uncached items fall back to a limit of 1, so this amount can be zero or negative; passed as is.
-        if sameItem and targetCount and targetCount ~= stackLimit
-            and targetCount + (sourceCount or 0) > stackLimit then
-            BagSplitItem(fromBag, fromSlot, stackLimit - targetCount)
+-- Update location cache after scheduling a move
+local function UpdateLocation(from, to)
+    if (bag_ids[from] == bag_ids[to]) and (bag_stacks[to] < bag_maxstacks[to]) then
+        local stack_size = bag_maxstacks[to]
+        if (bag_stacks[to] + bag_stacks[from]) > stack_size then
+            bag_stacks[from] = bag_stacks[from] - (stack_size - bag_stacks[to])
+            bag_stacks[to] = stack_size
         else
-            BagPickupItem(fromBag, fromSlot)
+            bag_stacks[to] = bag_stacks[to] + bag_stacks[from]
+            bag_stacks[from] = nil
+            bag_ids[from] = nil
+            bag_maxstacks[from] = nil
         end
-
-        local guildSource = IsGuildBankBag(fromBag)
-        if guildSource or CursorHasItem() then
-            BagPickupItem(toBag, toSlot)
-        end
-        -- The guild bank updates cursor and slots late, so only one guild move goes out per tick.
-        if guildSource then return end
+    else
+        bag_ids[from], bag_ids[to] = bag_ids[to], bag_ids[from]
+        bag_stacks[from], bag_stacks[to] = bag_stacks[to], bag_stacks[from]
+        bag_maxstacks[from], bag_maxstacks[to] = bag_maxstacks[to], bag_maxstacks[from]
     end
-
-    Notify("Sort complete.", 0.4, 1, 0.4)
-    StopSorting()
 end
 
-tickDriver:SetScript("OnUpdate", function(_, elapsed)
-    tickAccumulator = tickAccumulator + elapsed
-    if tickAccumulator >= GetSortMoveInterval() then
-        tickAccumulator = 0
-        IssueNextMoves()
-    end
-end)
+local function AddMove(source, destination)
+    UpdateLocation(source, destination)
+    tinsert(moves, 1, encode_move(source, destination))
+end
 
-local function BeginMoves()
-    ReleaseSnapshot()
-    if #plannedMoves == 0 then
-        return false
+-- Fill partial target stacks from source_bags (reverse iteration).
+-- require_partial_source: same-bag compress skips full sources; cross-bag allows them.
+local function StackBags(source_bags, target_bags, require_partial_source)
+    local target_items = {}
+    local target_slots = {}
+    local source_used = {}
+
+    for bag, slot, bagslot in IterateBags(target_bags) do
+        if not IsSlotLocked(bag, slot) then
+            local itemid = bag_ids[bagslot]
+            if itemid and bag_stacks[bagslot] and bag_maxstacks[bagslot] and (bag_stacks[bagslot] ~= bag_maxstacks[bagslot]) then
+                target_items[itemid] = (target_items[itemid] or 0) + 1
+                tinsert(target_slots, bagslot)
+            end
+        end
     end
-    running = true
-    tickDriver:Show()
+
+    local source_slots = {}
+    for bag, slot, bagslot in IterateBags(source_bags) do
+        if not IsSlotLocked(bag, slot) then
+            tinsert(source_slots, bagslot)
+        end
+    end
+    for si = #source_slots, 1, -1 do
+        local source_slot = source_slots[si]
+        local itemid = bag_ids[source_slot]
+        local source_ok = itemid and target_items[itemid]
+        if require_partial_source then
+            source_ok = source_ok and (bag_maxstacks[source_slot] - bag_stacks[source_slot]) > 0
+        end
+        if source_ok then
+            for ti = #target_slots, 1, -1 do
+                local target_slot = target_slots[ti]
+                if bag_ids[source_slot]
+                    and bag_ids[target_slot] == itemid
+                    and target_slot ~= source_slot
+                    and not (bag_stacks[target_slot] == bag_maxstacks[target_slot])
+                    and not source_used[target_slot]
+                then
+                    AddMove(source_slot, target_slot)
+                    source_used[source_slot] = true
+                    if bag_stacks[target_slot] == bag_maxstacks[target_slot] then
+                        target_items[itemid] = (target_items[itemid] > 1) and (target_items[itemid] - 1) or nil
+                    end
+                    if bag_stacks[source_slot] == 0 then
+                        target_items[itemid] = (target_items[itemid] > 1) and (target_items[itemid] - 1) or nil
+                        break
+                    end
+                    if not target_items[itemid] then break end
+                end
+            end
+        end
+    end
+end
+
+local function CompressStacks(bags)
+    StackBags(bags, bags, true)
+end
+
+local function StackBagsAcross(source_bags, target_bags)
+    StackBags(source_bags, target_bags, false)
+end
+
+-- Check if a move actually needs to happen
+local function ShouldActuallyMove(source, destination)
+    if destination == source then return end
+    if not bag_ids[source] then return end
+    local sBag, sSlot = decode_bagslot(source)
+    local dBag, dSlot = decode_bagslot(destination)
+    if IsSlotLocked(sBag, sSlot) or IsSlotLocked(dBag, dSlot) then return end
+    if bag_ids[source] == bag_ids[destination] and bag_stacks[source] == bag_stacks[destination] then return end
     return true
 end
 
-local function SlotCode(bag, slot)
-    return bag * 100 + slot
-end
-
-local function PrintBankScan()
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66" .. T("=== BANK SCAN DEBUG ===", "=== BANK SCAN DEBUG ===") .. "|r")
-    for _, bag in ipairs(bankPoolBags) do
-        local column = slotGrid[bag] or {}
-        for slot = 1, #column do
-            local cell = column[slot]
-            if cell.item then
-                local facts = itemFacts[cell.item]
-                DEFAULT_CHAT_FRAME:AddMessage(string.format("  [%s] bag%s/s%s: %s (id=%s r=%s lv=%s t=%s st=%s eq=%s x%s)",
-                    SlotCode(bag, slot), bag, slot, facts.name, cell.item, facts.quality, facts.level,
-                    facts.class, facts.subclass, facts.equipLoc, cell.qty))
-            end
+-- Update sorted array after scheduling a move
+local function UpdateSorted(sorted, source, destination)
+    for i, bs in pairs(sorted) do
+        if bs == source then
+            sorted[i] = destination
+        elseif bs == destination then
+            sorted[i] = source
         end
     end
 end
 
-local function PrintPlannedMoves()
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66=== " .. #plannedMoves .. " MOVES ===|r")
-    for _, move in ipairs(plannedMoves) do
-        DEFAULT_CHAT_FRAME:AddMessage(string.format("  move: [%s]->  [%s]",
-            SlotCode(move.fromBag, move.fromSlot), SlotCode(move.toBag, move.toSlot)))
+-- Sort items in the given bags
+local function SortItems(bags)
+    if not item_types then BuildSortOrder() end
+
+    -- Sort only unlocked slots; locked slots remain in-place and are never moved.
+    local sources = {}
+    local destinations = {}
+    for bag, slot, bagslot in IterateBags(bags) do
+        if not IsSlotLocked(bag, slot) then
+            tinsert(sources, bagslot)
+            tinsert(destinations, bagslot)
+        end
     end
+
+    table.sort(sources, DefaultSorter)
+
+    -- Trash to the end, rest stays front: split the sorted slots into
+    -- normal / empty / trash so gray items land on the last slots.
+    -- Empty slots in the middle keep trash pinned last as new loot arrives.
+    do
+        local normalS, trashS, emptyS = {}, {}, {}
+        for _, bs in ipairs(sources) do
+            local id = bag_ids[bs]
+            if not id then
+                tinsert(emptyS, bs)
+            elseif IsTrashItem(id) then
+                tinsert(trashS, bs)
+            else
+                tinsert(normalS, bs)
+            end
+        end
+        sources = {}
+        for _, bs in ipairs(normalS) do tinsert(sources, bs) end
+        for _, bs in ipairs(emptyS) do tinsert(sources, bs) end
+        for _, bs in ipairs(trashS) do tinsert(sources, bs) end
+    end
+
+    -- When reverse_stack is enabled, items are placed at the end of each bag
+    -- instead of the front. This leaves empty slots at the top of Bagster
+    -- so new loot is immediately visible without scrolling.
+    local cfg = GetModuleConfig()
+    if cfg and cfg.reverse_stack then
+        local reversed = {}
+        for i = #destinations, 1, -1 do
+            tinsert(reversed, destinations[i])
+        end
+        destinations = reversed
+    end
+
+    local bag_locked = {}
+    local another_pass = true
+    while another_pass do
+        another_pass = false
+        for i = 1, #destinations do
+            local destination = destinations[i]
+            local source = sources[i]
+            if ShouldActuallyMove(source, destination) then
+                if not (bag_locked[source] or bag_locked[destination]) then
+                    AddMove(source, destination)
+                    UpdateSorted(sources, source, destination)
+                    bag_locked[source] = true
+                    bag_locked[destination] = true
+                else
+                    another_pass = true
+                end
+            end
+        end
+        wipe(bag_locked)
+    end
+end
+
+-- Compress + sort each bag family on its own (herb/enchant/… never mix with normal bags)
+local function CompressAndSortBagGroups(bags)
+    local families, groups = GroupBagsByFamily(bags)
+    for i = 1, #families do
+        local group = groups[families[i]]
+        CompressStacks(group)
+        SortItems(group)
+    end
+end
+
+-- Move execution frame
+local moveFrame = CreateFrame("Frame")
+local moveTimer = 0
+local sortStallTime = 0
+local SORT_STALL_TIMEOUT = 8
+local current_id, current_target
+local current_source_bag, current_source_slot
+local current_displaced = false
+local current_displaced_id, current_target_itemid
+local current_target_count
+-- Transient cursor-state tolerance (see CURSOR_MISMATCH_TOLERANCE above).
+local cursorMismatchTime = 0
+local idleCursorTime = 0
+
+local function CursorItemID()
+    if not CursorHasItem() then return nil end
+    local cursorType, _, cursorLink = GetCursorInfo()
+    -- Right after a Pickup the cursor flag can be set a frame before
+    -- GetCursorInfo() returns the link. Report "unknown" (false) instead
+    -- of nil so callers wait instead of aborting with a false mismatch.
+    if cursorLink == nil then return false end
+    if cursorType ~= nil and cursorType ~= "item" then return false end
+    local id = link_to_id(cursorLink)
+    if id == nil then return false end
+    return id
+end
+
+-- A swap is three pickups, not two: source -> cursor, target -> target
+-- (displacing the old target item), then cursor -> source.  The last step
+-- can need a retry while the client catches up with the bag update.
+local function ReturnDisplacedItem(dt)
+    if not current_displaced then return true end
+    if not CursorHasItem() then
+        current_displaced = false
+        cursorMismatchTime = 0
+        return true
+    end
+
+    local cursorID = CursorItemID()
+    if cursorID == false then
+        -- Cursor flag set but link not readable yet: transient, wait.
+        return false
+    end
+    if current_displaced_id and cursorID ~= current_displaced_id then
+        -- Possible external cursor change, but GetCursorInfo() can lag one
+        -- frame behind CursorHasItem(). Only abort if it persists.
+        cursorMismatchTime = (cursorMismatchTime or 0) + (dt or 0)
+        if cursorMismatchTime < CURSOR_MISMATCH_TOLERANCE then
+            return false
+        end
+        StopSorting("DragonUI: Sort interrupted.")
+        return false
+    end
+    cursorMismatchTime = 0
+
+    if not current_source_bag or not current_source_slot then
+        return false
+    end
+
+    -- Do not click the source again until the first pickup has been reflected
+    -- locally; otherwise a delayed update could undo the move.
+    local _, _, source_locked = BagGetItemInfo(current_source_bag, current_source_slot)
+    if source_locked then return false end
+    if BagGetItemLink(current_source_bag, current_source_slot) then
+        return false
+    end
+
+    -- Clicking: respect pickup spacing.
+    if moveTimer < GetSortMoveInterval() then return false end
+    moveTimer = 0
+    BagPickupItem(current_source_bag, current_source_slot)
+    if CursorHasItem() then
+        return false
+    end
+
+    current_displaced = false
+    return true
+end
+
+moveFrame:SetScript("OnUpdate", function(self, elapsed)
+    sortStallTime = sortStallTime + elapsed
+    if sortStallTime >= SORT_STALL_TIMEOUT then
+        StopSorting("DragonUI: Sort timed out; please check the item cursor.")
+        return
+    end
+
+    moveTimer = moveTimer + elapsed
+    -- Two-tier timing: pure reads (locks, links, counts) poll every frame so
+    -- a confirmed move continues with minimal latency. Any tick that clicks
+    -- items (pickup/split) must still be spaced by the full interval, since
+    -- BAG_UPDATE can arrive before the server releases item locks.
+    local interval = GetSortMoveInterval()
+
+    -- Finish the previous move before starting another one.  If the target
+    -- was occupied, return its displaced item to the now-empty source slot.
+    if current_target then
+        local target_bag, target_slot = decode_bagslot(current_target)
+        if CursorHasItem() then
+            if current_displaced then
+                if not ReturnDisplacedItem(elapsed) then return end
+            else
+                local cursor_itemid = CursorItemID()
+                if cursor_itemid == false then
+                    -- Cursor flag set but link not readable yet: transient, retry next tick.
+                    cursorMismatchTime = 0
+                    return
+                end
+                if cursor_itemid ~= current_id then
+                    -- The target lookup may have raced the bag update. If the
+                    -- cursor contains the known old target item, finish the
+                    -- swap; otherwise this may be an external cursor change
+                    -- or a 1-frame API race, so tolerate it briefly.
+                    if current_target_itemid and cursor_itemid == current_target_itemid then
+                        current_displaced = true
+                        current_displaced_id = cursor_itemid
+                        cursorMismatchTime = 0
+                        if not ReturnDisplacedItem(elapsed) then return end
+                    else
+                        cursorMismatchTime = (cursorMismatchTime or 0) + elapsed
+                        if cursorMismatchTime < CURSOR_MISMATCH_TOLERANCE then
+                            return
+                        end
+                        StopSorting("DragonUI: Sort interrupted.")
+                        return
+                    end
+                else
+                    cursorMismatchTime = 0
+                    -- The source item is still on the cursor, so retry placing
+                    -- it into an empty target while the bag API catches up.
+                    local _, _, target_locked = BagGetItemInfo(target_bag, target_slot)
+                    if target_locked then return end
+                    -- Clicking: respect pickup spacing.
+                    if moveTimer < interval then return end
+                    moveTimer = 0
+                    BagPickupItem(target_bag, target_slot)
+                    if CursorHasItem() then return end
+                end
+            end
+        end
+
+        if CursorHasItem() then
+            return
+        end
+
+        -- Wait for the complete destination update before allowing another
+        -- move. The count check matters for partial-stack moves where the
+        -- item link stays unchanged.
+        local _, _, source_locked = BagGetItemInfo(current_source_bag, current_source_slot)
+        local _, confirmed_target_count, target_locked = BagGetItemInfo(target_bag, target_slot)
+        if source_locked or target_locked
+            or link_to_id(BagGetItemLink(target_bag, target_slot)) ~= current_id
+            or (current_target_count and confirmed_target_count ~= current_target_count)
+        then
+            return
+        end
+
+        current_id = nil
+        current_target = nil
+        current_source_bag = nil
+        current_source_slot = nil
+        current_displaced = false
+        current_displaced_id = nil
+        current_target_itemid = nil
+        current_target_count = nil
+        sortStallTime = 0
+        cursorMismatchTime = 0
+        idleCursorTime = 0
+    elseif CursorHasItem() then
+        -- There is no active move that could own this cursor item. This can
+        -- still be a 1-frame race (cursor flag set before GetCursorInfo, or
+        -- a stale flag right after a place). Wait briefly instead of
+        -- aborting with a false "item on cursor".
+        idleCursorTime = (idleCursorTime or 0) + elapsed
+        if idleCursorTime < CURSOR_MISMATCH_TOLERANCE then
+            return
+        end
+        StopSorting("DragonUI: Sort interrupted.")
+        return
+    else
+        idleCursorTime = 0
+    end
+
+    if #moves > 0 then
+        for i = #moves, 1, -1 do
+            if CursorHasItem() then return end
+            local source, target = decode_move(moves[i])
+            local source_bag, source_slot = decode_bagslot(source)
+            local target_bag, target_slot = decode_bagslot(target)
+            local _, source_count, source_locked = BagGetItemInfo(source_bag, source_slot)
+            local _, target_count, target_locked = BagGetItemInfo(target_bag, target_slot)
+
+            if source_locked or target_locked then return end
+
+            -- Clicking: respect pickup spacing (the lock reads above poll every frame).
+            if moveTimer < interval then return end
+            moveTimer = 0
+
+            tremove(moves, i)
+            local source_link = BagGetItemLink(source_bag, source_slot)
+            local source_itemid = link_to_id(source_link)
+            if not source_itemid then
+                StopSorting("DragonUI: Sort confused, stopping.")
+                return
+            end
+
+            local stack_size = bag_maxstacks[encode_bagslot(source_bag, source_slot)] or select(8, GetItemInfo(source_itemid)) or 1
+            if stack_size < 1 then stack_size = 1 end
+            current_target = target
+            current_id = source_itemid
+            current_source_bag = source_bag
+            current_source_slot = source_slot
+            current_displaced = false
+            current_displaced_id = nil
+            cursorMismatchTime = 0
+            idleCursorTime = 0
+            sortStallTime = 0
+
+            local target_link = BagGetItemLink(target_bag, target_slot)
+            local target_itemid = link_to_id(target_link)
+            current_target_itemid = target_itemid
+            if target_itemid == source_itemid then
+                current_target_count = math.min(stack_size, (target_count or 0) + (source_count or 0))
+            else
+                current_target_count = source_count or 0
+            end
+
+            if (source_itemid == target_itemid) and target_count and (target_count ~= stack_size) and ((target_count + (source_count or 0)) > stack_size) then
+                BagSplitItem(source_bag, source_slot, stack_size - target_count)
+            else
+                BagPickupItem(source_bag, source_slot)
+            end
+            local isGuildBankMove = IsGuildBankBag(source_bag)
+            if CursorHasItem() or isGuildBankMove then
+                BagPickupItem(target_bag, target_slot)
+            end
+
+            -- If target was occupied, the second pickup leaves that old item
+            -- on the cursor. Return it to source to complete the swap.
+            if CursorHasItem() then
+                local cursor_itemid = CursorItemID()
+                if cursor_itemid == false then
+                    -- Link not readable yet this tick; retry next tick.
+                    return
+                end
+                -- A stack merge holds the same item id on cursor; that is a
+                -- retry, never a displaced swap item.
+                current_displaced = target_itemid ~= nil and target_itemid ~= source_itemid and cursor_itemid == target_itemid
+                if current_displaced then
+                    current_displaced_id = target_itemid
+                    cursorMismatchTime = 0
+                    if not ReturnDisplacedItem(elapsed) then return end
+                elseif not isGuildBankMove then
+                    if cursor_itemid ~= current_id then
+                        cursorMismatchTime = (cursorMismatchTime or 0) + elapsed
+                        if cursorMismatchTime < CURSOR_MISMATCH_TOLERANCE then
+                            return
+                        end
+                        StopSorting("DragonUI: Sort interrupted.")
+                        return
+                    end
+                    cursorMismatchTime = 0
+                    -- Target was empty but the source item is still held;
+                    -- leave it for the retry path at the next tick.
+                    return
+                end
+            end
+
+            -- One guild-bank move per tick: state doesn't update predictively like bags.
+            if isGuildBankMove then return end
+
+            -- Never start a second move until this move's destination has
+            -- been confirmed on a later update tick.
+            return
+        end
+    end
+
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("Sort complete.", "Sort complete."), 0.4, 1, 0.4)
+    StopSorting()
+end)
+moveFrame:Hide()
+
+StopSorting = function(message)
+    running = false
+    guildBankSortActive = false
+    current_id = nil
+    current_target = nil
+    current_source_bag = nil
+    current_source_slot = nil
+    current_displaced = false
+    current_displaced_id = nil
+    current_target_itemid = nil
+    current_target_count = nil
+    sortStallTime = 0
+    cursorMismatchTime = 0
+    idleCursorTime = 0
+    moveTimer = 0
+    wipe(moves)
+    moveFrame:Hide()
+    if message then
+        DEFAULT_CHAT_FRAME:AddMessage(message, 1, 0.4, 0.4)
+    end
+end
+
+local function StartSorting()
+    -- There is no previous move to protect on the first tick.
+    moveTimer = GetSortMoveInterval()
+    sortStallTime = 0
+    cursorMismatchTime = 0
+    idleCursorTime = 0
+    wipe(bag_maxstacks)
+    wipe(bag_stacks)
+    wipe(bag_ids)
+    wipe(item_cache)
+
+    if #moves > 0 then
+        running = true
+        moveFrame:Show()
+    end
+end
+
+-- ============================================================================
+-- PUBLIC SORT FUNCTIONS
+-- ============================================================================
+
+local function SortCursorIsOccupied()
+    if not CursorHasItem() then return false end
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("Put away the item on your cursor before sorting.", "Put away the item on your cursor before sorting."), 1, 0.8, 0)
+    return true
 end
 
 local function SortPlayerBags()
     if running then
-        Notify("Sort already in progress.", 1, 0.8, 0)
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("Sort already in progress.", "Sort already in progress."), 1, 0.8, 0)
         return
     end
-    ResetPlan()
-    CaptureBags(personalBags)
-    PlanFamilyPools(playerPoolBags)
-    if not BeginMoves() then
-        Notify("Bags already sorted!", 0.4, 1, 0.4)
+    if SortCursorIsOccupied() then return end
+
+    ScanBags(ALL_BAGS)
+    CompressAndSortBagGroups(PLAYER_BAGS)
+    StartSorting()
+
+    if #moves == 0 then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("Bags already sorted!", "Bags already sorted!"), 0.4, 1, 0.4)
     end
 end
 
 local function SortBankBags()
     if running then
-        Notify("Sort already in progress.", 1, 0.8, 0)
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("Sort already in progress.", "Sort already in progress."), 1, 0.8, 0)
         return
     end
+    if SortCursorIsOccupied() then return end
     if not bank_open then
-        Notify("You must be at the bank.", 1, 0.4, 0.4)
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("You must be at the bank.", "You must be at the bank."), 1, 0.4, 0.4)
         return
     end
-    ResetPlan()
-    CaptureBags(personalBags)
+
+    ScanBags(ALL_BAGS)
+
+    -- Debug: print what ScanBags found for bank items
     if addon.debugMode then
-        PrintBankScan()
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66" .. T("=== BANK SCAN DEBUG ===", "=== BANK SCAN DEBUG ===") .. "|r")
+        for bag, slot, bagslot in IterateBags(BANK_BAGS) do
+            local id = bag_ids[bagslot]
+            if id then
+                local info = item_cache[id]
+                DEFAULT_CHAT_FRAME:AddMessage(string.format("  [%d] bag%d/s%d: %s (id=%d r=%d lv=%d t=%s st=%s eq=%s x%d)",
+                    bagslot, bag, slot,
+                    info and info.name or "NIL_NAME",
+                    id,
+                    info and info.rarity or -1,
+                    info and info.level or -1,
+                    info and info.itype or "NIL",
+                    info and info.subType or "NIL",
+                    info and info.equipLoc or "NIL",
+                    bag_stacks[bagslot] or 0))
+            end
+        end
     end
-    -- Families are ignored here on purpose: any carried stack may top up any open bank stack.
+
     if IsBankFillFromBagsEnabled() then
-        TopUpStacks(carriedBags, bankPoolBags, true)
+        local fillBags = {}
+        for _, bag in ipairs(PLAYER_BAGS) do
+            if bag ~= KEYRING_CONTAINER then
+                tinsert(fillBags, bag)
+            end
+        end
+        StackBagsAcross(fillBags, BANK_BAGS)
     end
-    PlanFamilyPools(bankPoolBags)
+    CompressAndSortBagGroups(BANK_BAGS)
+
+    -- Debug: print sorted order and moves
     if addon.debugMode then
-        PrintPlannedMoves()
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00cc66=== %d MOVES ===|r", #moves))
+        for i = #moves, 1, -1 do
+            local s, t = decode_move(moves[i])
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("  move: [%d]->  [%d]", s, t))
+        end
     end
-    if not BeginMoves() then
-        Notify("Bank already sorted!", 0.4, 1, 0.4)
+
+    StartSorting()
+
+    if #moves == 0 then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("Bank already sorted!", "Bank already sorted!"), 0.4, 1, 0.4)
     end
 end
 
--- Only the shown tab is touched; crossing tabs would spend withdrawal allowance just to reorder.
+-- ============================================================================
+-- GUILD BANK SORTING (single tab only, never crosses tabs)
+-- ============================================================================
+-- Crossing tabs would spend withdrawal allowance on both ends just to reorder.
+
 local function PerformGuildBankSort()
     if running then
-        Notify("Sort already in progress.", 1, 0.8, 0)
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("Sort already in progress.", "Sort already in progress."), 1, 0.8, 0)
         return
     end
+    if SortCursorIsOccupied() then return end
     if not guild_bank_open then
-        Notify("You must be at the guild bank.", 1, 0.4, 0.4)
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("You must be at the guild bank.", "You must be at the guild bank."), 1, 0.4, 0.4)
         return
     end
-    if not GetCurrentGuildBankTab then return end
+    if type(GetCurrentGuildBankTab) ~= "function" then
+        return
+    end
+
     local tab = GetCurrentGuildBankTab()
     if not tab or tab < 1 then
-        Notify("Could not determine the current guild bank tab.", 1, 0.4, 0.4)
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("Could not determine the current guild bank tab.", "Could not determine the current guild bank tab."), 1, 0.4, 0.4)
         return
     end
+
     if GetGuildBankTabSlotCount(tab) == 0 then
-        Notify("You need full deposit and withdraw access to this tab to sort it.", 1, 0.4, 0.4)
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("You need full deposit and withdraw access to this tab to sort it.", "You need full deposit and withdraw access to this tab to sort it."), 1, 0.4, 0.4)
         return
     end
+
     local tabBags = { GUILDBANK_TAB_OFFSET + tab }
-    ResetPlan()
-    CaptureBags(tabBags)
-    TopUpStacks(tabBags, tabBags, false)
-    ArrangePool(tabBags)
-    if #plannedMoves == 0 then
-        ReleaseSnapshot()
-        Notify("This guild bank tab is already sorted!", 0.4, 1, 0.4)
+    ScanBags(tabBags)
+    CompressStacks(tabBags)
+    SortItems(tabBags)
+
+    if #moves == 0 then
+        StartSorting() -- still wipes the scratch scan caches
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("This guild bank tab is already sorted!", "This guild bank tab is already sorted!"), 0.4, 1, 0.4)
         return
     end
+
     guildBankSortActive = true
-    BeginMoves()
+    StartSorting()
 end
 
 StaticPopupDialogs["DRAGONUI_CONFIRM_GUILDBANK_SORT"] = {
@@ -2096,10 +2492,14 @@ ApplyBagSortSystem = function()
             guild_bank_open = false
         end
     end)
-    for _, eventName in ipairs({ "BANKFRAME_OPENED", "BANKFRAME_CLOSED", "GUILDBANKFRAME_OPENED", "GUILDBANKFRAME_CLOSED" }) do
-        eventFrame:RegisterEvent(eventName)
-        BagSortModule.registeredEvents[eventName] = true
-    end
+    eventFrame:RegisterEvent("BANKFRAME_OPENED")
+    eventFrame:RegisterEvent("BANKFRAME_CLOSED")
+    eventFrame:RegisterEvent("GUILDBANKFRAME_OPENED")
+    eventFrame:RegisterEvent("GUILDBANKFRAME_CLOSED")
+    BagSortModule.registeredEvents["BANKFRAME_OPENED"] = true
+    BagSortModule.registeredEvents["BANKFRAME_CLOSED"] = true
+    BagSortModule.registeredEvents["GUILDBANKFRAME_OPENED"] = true
+    BagSortModule.registeredEvents["GUILDBANKFRAME_CLOSED"] = true
 
     -- Register slash commands
     SlashCmdList["DRAGONUI_SORT"] = SortPlayerBags

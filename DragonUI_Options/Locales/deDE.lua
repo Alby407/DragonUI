@@ -1367,6 +1367,8 @@ L["Choose the modifier + mouse button used to lock or unlock a bag slot while ho
 L["Use /sortlock to lock or unlock the currently hovered slot from chat."] = "Mit /sortlock kannst du den Platz unter dem Mauszeiger auch per Chat sperren oder freigeben."
 L["Reverse Stack Order"] = "Stapelreihenfolge umkehren"
 L["Stack sorted items from the end of each bag so empty slots stay at the top."] = "Sortierte Gegenstände vom Ende jeder Tasche stapeln, damit freie Plätze oben bleiben."
+L["Sort Speed"] = "Sortiertempo"
+L["Delay between item moves while sorting. Increase this if sorting aborts with an 'item on cursor' message (common on high-latency realms)."] = "Pause zwischen Gegenstandsbewegungen beim Sortieren. Erhöhe diesen Wert, wenn das Sortieren mit einer „Gegenstand auf dem Cursor“-Meldung abbricht (häufig auf Realms mit hoher Latenz)."
 L["Alt + Left Click"] = "Alt + Linksklick"
 L["Ctrl + Left Click"] = "Strg + Linksklick"
 L["Shift + Left Click"] = "Umschalt + Linksklick"

@@ -1194,7 +1194,15 @@ events:SetScript("OnEvent", function(_, event, arg1)
         end
         -- 3.3.5a passes autoLoot as a number, unlike retail's boolean.
         isAutoLoot = arg1 and arg1 ~= 0
-        if EnsureRows(GetNumLootItems()) then
+        -- Blizzard already laid the window out by now, so a grown pool has to redo it.
+        local lootCount = GetNumLootItems() or 0
+        -- Event handler order is not guaranteed: our handler can run before
+        -- LootFrame_OnEvent/LootFrame_Show initializes these Blizzard fields.
+        -- Seed them before calling LootFrame_Update(), whose 3.3.5 code
+        -- compares against LootFrame.numLootItems unconditionally.
+        _G.LootFrame.page = 1
+        _G.LootFrame.numLootItems = lootCount
+        if EnsureRows(lootCount) then
             SyncPanelLevel(_G.LootFrame)
             -- Hidden means Blizzard's handler runs after ours: numLootItems is unset, and its Show lays us out.
             if _G.LootFrame:IsShown() then

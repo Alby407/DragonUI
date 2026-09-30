@@ -477,6 +477,27 @@ local function BuildBagsTab(scroll)
         end,
     })
 
+    C:AddSlider(sortSection, {
+        label = LO["Sort Speed"] or "Sort Speed",
+        desc = LO["Delay between item moves while sorting. Increase this if sorting aborts with an 'item on cursor' message (common on high-latency realms)."] or "Delay between item moves while sorting. Increase this if sorting aborts with an 'item on cursor' message (common on high-latency realms).",
+        min = 0.08, max = 0.5, step = 0.01,
+        getFunc = function()
+            local cfg = GetBagSortConfig(false)
+            local v = cfg and tonumber(cfg.move_interval) or 0.15
+            if v < 0.08 then v = 0.08 end
+            if v > 0.5 then v = 0.5 end
+            return v
+        end,
+        setFunc = function(val)
+            local cfg = GetBagSortConfig(true)
+            if cfg then cfg.move_interval = val end
+        end,
+        disabled = function()
+            local cfg = GetBagSortConfig(false)
+            return not (cfg and cfg.enabled)
+        end,
+    })
+
     -- ====================================================================
     -- ALT GOLD
     -- ====================================================================
