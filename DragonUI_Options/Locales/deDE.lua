@@ -1009,6 +1009,7 @@ L["Inside the Bar, Value Left and Percent Right"] = "Im Balken, Wert links und P
 L["Center Name"] = "Name zentrieren"
 L["Center the name in the space the health text leaves free."] = "Zentriert den Namen in dem Platz, den der Gesundheitstext frei lässt."
 L["Font size of the name, and of the health text when it follows the name (1-10, default 2)."] = "Schriftgröße des Namens und des Gesundheitstexts, wenn er dem Namen folgt (1-10, Standard 2)."
+L["Font size of the name, and of the health text when it follows the name (-2-10, default 2)."] = "Schriftgröße des Namens und des Gesundheitstexts, wenn er dem Namen folgt (-2-10, Standard 2)."
 L["Inset the name, level, and health text from the left and right edges of the health bar. Does not affect the elite icon."] = "Rückt Name, Level und Gesundheitstext vom linken und rechten Rand des Gesundheitsbalkens ein. Betrifft nicht das Elite-Symbol."
 L["Show"] = "Anzeigen"
 L["Always (anyone's)"] = "Immer (von jedem)"

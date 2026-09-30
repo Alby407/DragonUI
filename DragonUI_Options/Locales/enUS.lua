@@ -1114,6 +1114,7 @@ L["Inside the Bar, Value Left and Percent Right"] = true
 L["Center Name"] = true
 L["Center the name in the space the health text leaves free."] = true
 L["Font size of the name, and of the health text when it follows the name (1-10, default 2)."] = true
+L["Font size of the name, and of the health text when it follows the name (-2-10, default 2)."] = true
 L["Inset the name, level, and health text from the left and right edges of the health bar. Does not affect the elite icon."] = true
 L["Show"] = true
 L["Always (anyone's)"] = true

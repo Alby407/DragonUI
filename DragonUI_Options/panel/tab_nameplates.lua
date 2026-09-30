@@ -848,9 +848,9 @@ local function BuildHealthSubTab(scroll)
     })
     C:AddSlider(fontRow, {
         label = LO["Font Size"],
-        desc = LO["Font size of the name, and of the health text when it follows the name (1-10, default 2)."],
+        desc = LO["Font size of the name, and of the health text when it follows the name (-2-10, default 2)."],
         dbPath = DB .. ".fontSize",
-        min = 1, max = 10, step = 1,
+        min = -2, max = 10, step = 1,
         width = 200,
         callback = RefreshNameplates,
     })

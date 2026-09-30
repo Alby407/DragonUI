@@ -821,7 +821,7 @@ function NP.layout.ApplyNameplateFonts(plateData)
     end
     applyFont(plateData.minaName, snap(plateData.minaName, nameSize), textFlags)
     applyFont(plateData.minaHpPct, snap(plateData.minaHpPct, nameSize), textFlags)
-    applyFont(plateData.minaSubTitle, math.max(8, nameSize - 2))
+    applyFont(plateData.minaSubTitle, math.max(6, nameSize - 2))
     applyFont(plateData.minaHpNum, snap(plateData.minaHpNum, hpNumSize), textFlags)
     applyFont(plateData.minaHpBarPct, snap(plateData.minaHpBarPct, hpNumSize), textFlags)
     applyFont(plateData.minaPoCur, powerSize)
