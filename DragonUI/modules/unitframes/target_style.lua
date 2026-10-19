@@ -66,38 +66,7 @@ function UF.TargetStyle.Create(opts)
 
     -- Shared texture / constant tables from uf_core
     local TEXTURES    = UF.TEXTURES.targetStyle
-    local BOSS_COORDS = UF.BOSS_COORDS.targetStyle
     local POWER_MAP   = UF.POWER_MAP
-
-    -- Name background color variants sourced from UIUnitFrame2x_PTR.blp.
-    -- Coords extracted from the local PTR atlas (1024x512) and mapped by color.
-    local NAME_BG_PTR_TEXTURE = "Interface\\AddOns\\DragonUI\\Textures\\UnitFrames\\Target\\UIUnitFrame2x_PTR"
-    local NAME_BG_WIDTH = 135
-    local NAME_BG_HEIGHT = 14
-    local NAME_BG_OFFSET_X = -0.5
-    local NAME_BG_OFFSET_Y = 0.2
-    local NAME_BG_TEX_COORDS = {
-        blue = {
-            266 / 1024, 534 / 1024,
-            135 / 512, 166 / 512,
-        },
-        green = {
-            536 / 1024, 804 / 1024,
-            135 / 512, 166 / 512,
-        },
-        orange = {
-            266 / 1024, 534 / 1024,
-            168 / 512, 199 / 512,
-        },
-        red = {
-            536 / 1024, 804 / 1024,
-            168 / 512, 199 / 512,
-        },
-        yellow = {
-            266 / 1024, 534 / 1024,
-            201 / 512, 232 / 512,
-        },
-    }
 
     local NAME_BG_COLOR_PALETTE = {
         blue = {0.0, 0.44, 1.0},
@@ -107,13 +76,23 @@ function UF.TargetStyle.Create(opts)
         yellow = {1.0, 1.0, 0.0},
     }
 
+    -- The skin kind this frame reads: portrait off (uf_compact.lua) or the portrait art.
+    local function Kind()
+        return UF.IsCompact(configKey) and "targetCompact" or "target"
+    end
+
+    -- The bars' texture prefix for the current kind (+ "Health", "Health-Status" or a power name).
+    local function BarPrefix()
+        return UF.IsCompact(configKey) and UF.TEXTURES.compact.BAR_PREFIX or TEXTURES.BAR_PREFIX
+    end
+
     local function ApplyNameBackgroundLayout()
         if not NameBackground or not HealthBar then return end
 
+        local piece = UF.GetFrameSkin()[Kind()].nameBackground
         NameBackground:ClearAllPoints()
-        NameBackground:SetPoint(
-            "BOTTOMLEFT", HealthBar, "TOPLEFT", NAME_BG_OFFSET_X, NAME_BG_OFFSET_Y)
-        NameBackground:SetSize(NAME_BG_WIDTH, NAME_BG_HEIGHT)
+        NameBackground:SetPoint("BOTTOMLEFT", HealthBar, "TOPLEFT", piece.x, piece.y)
+        NameBackground:SetSize(piece.w, piece.h)
     end
 
     local function ResolveNameBackgroundColorKey(r, g, b)
@@ -179,6 +158,8 @@ function UF.TargetStyle.Create(opts)
 
         local wc = addon.db and addon.db.profile.widgets
                     and addon.db.profile.widgets[widgetKey]
+        -- Portrait off, the target hangs as far left as the player (UF.CompactShift); its editor box fits it.
+        local x = 20 - UF.CompactShift(configKey)
         if wc then
             Module.overlay:ClearAllPoints()
             Module.overlay:SetPoint(
@@ -187,15 +168,17 @@ function UF.TargetStyle.Create(opts)
                 wc.posX ~= nil and wc.posX or defaultPos.posX,
                 wc.posY ~= nil and wc.posY or defaultPos.posY)
             BlizzFrame:ClearAllPoints()
-            BlizzFrame:SetPoint("CENTER", Module.overlay, "CENTER", 20, -7)
+            BlizzFrame:SetPoint("CENTER", Module.overlay, "CENTER", x, -7)
         else
             Module.overlay:ClearAllPoints()
             Module.overlay:SetPoint(
                 defaultPos.anchor, UIParent, defaultPos.anchor,
                 defaultPos.posX, defaultPos.posY)
             BlizzFrame:ClearAllPoints()
-            BlizzFrame:SetPoint("CENTER", Module.overlay, "CENTER", 20, -7)
+            BlizzFrame:SetPoint("CENTER", Module.overlay, "CENTER", x, -7)
         end
+        UF.FitEditorBox(Module.overlay, BlizzFrame, x, -7,
+            UF.IsCompact(configKey) and UF.COMPACT.targetBox or nil, GetConfig().scale)
     end
 
     local function StartPositionStabilizer(duration)
@@ -327,7 +310,7 @@ function UF.TargetStyle.Create(opts)
         if not texture then return end
 
         if config.classcolor and UnitIsPlayer(unitToken) then
-            local statusPath = TEXTURES.BAR_PREFIX .. "Health-Status"
+            local statusPath = BarPrefix() .. "Health-Status"
             if texture:GetTexture() ~= statusPath then
                 texture:SetTexture(statusPath)
                 texture:SetDrawLayer("ARTWORK", 1)
@@ -340,7 +323,7 @@ function UF.TargetStyle.Create(opts)
                 texture:SetVertexColor(1, 1, 1, 1)
             end
         else
-            local normalPath = TEXTURES.BAR_PREFIX .. "Health"
+            local normalPath = BarPrefix() .. "Health"
             if texture:GetTexture() ~= normalPath then
                 texture:SetTexture(normalPath)
                 texture:SetDrawLayer("ARTWORK", 1)
@@ -362,7 +345,7 @@ function UF.TargetStyle.Create(opts)
 
         local powerType = UnitPowerType(unitToken)
         local powerName = POWER_MAP[powerType] or "Mana"
-        texture:SetTexture(TEXTURES.BAR_PREFIX .. powerName)
+        texture:SetTexture(BarPrefix() .. powerName)
         texture:SetDrawLayer("ARTWORK", 1)
         texture:SetVertexColor(1, 1, 1)
 
@@ -374,41 +357,251 @@ function UF.TargetStyle.Create(opts)
     end
 
     -- ================================================================
+    -- SKIN (art and bar geometry from uf_skins.lua)
+    -- ================================================================
+
+    local function ApplyBarLayout(bar, layout)
+        bar:ClearAllPoints()
+        bar:SetSize(layout.w, layout.h)
+        bar:SetPoint("RIGHT", Portrait, "LEFT", layout.x, layout.y)
+        bar:SetFrameLevel(BlizzFrame:GetFrameLevel())
+    end
+
+    local function ApplyPortraitLayout()
+        local layout = UF.GetFrameSkin()[Kind()].portrait
+        Portrait:ClearAllPoints()
+        Portrait:SetSize(layout.w, layout.h)
+        Portrait:SetPoint("TOPRIGHT", BlizzFrame, "TOPRIGHT", layout.x, layout.y)
+    end
+
+    -- Bars anchor to the portrait, so both go together; the dragons and the PvP badge follow it too.
+    local function ApplyBarsLayout()
+        local skin = UF.GetFrameSkin()[Kind()]
+        if Portrait then
+            ApplyPortraitLayout()
+        end
+        if HealthBar then
+            ApplyBarLayout(HealthBar, skin.bars.health)
+        end
+        if ManaBar then
+            ApplyBarLayout(ManaBar, skin.bars.mana)
+        end
+        Module.appliedLayout = skin
+    end
+
+    local skullHome, levelTextSize, nameHome
+    -- The bent dragon shown now (ShowDragon): the name and the threat percentage make room for it.
+    local compactDragon
+    local ApplyThreatFlash
+
+    -- Blizzard owns the name width (FocusFrame_SetSmallSize), so only what the Forever spot changed is undone.
+    local function ApplyNameLayout()
+        if not NameText or not HealthBar then return end
+        local compact = UF.IsCompact(configKey)
+        local name = not compact and UF.GetNameSpot("target")
+        NameText:ClearAllPoints()
+        if compact then
+            if not nameHome then
+                nameHome = { NameText:GetWidth(), NameText:GetJustifyH() }
+            end
+            local healthWidth = UF.GetFrameSkin()[Kind()].bars.health.w
+            local point, x, y, w, justify = UF.CompactTargetName(compactDragon, healthWidth)
+            NameText:SetPoint(point, HealthBar, "TOPLEFT", x, y)
+            NameText:SetWidth(w)
+            NameText:SetJustifyH(justify)
+        elseif name and frameElements.background then
+            if not nameHome then
+                nameHome = { NameText:GetWidth(), NameText:GetJustifyH() }
+            end
+            NameText:SetPoint("LEFT", frameElements.background, "TOPLEFT", name.x, name.y)
+            NameText:SetWidth(name.w)
+            NameText:SetJustifyH(UF.GetNameSpotJustify())
+        else
+            NameText:SetPoint("BOTTOM", HealthBar, "TOP", 10, 3)
+            if nameHome then
+                NameText:SetWidth(nameHome[1])
+                NameText:SetJustifyH(nameHome[2])
+                nameHome = nil
+            end
+        end
+    end
+
+    local function ApplyLevelLayout()
+        local circle, levelFrame = frameElements.levelCircle, frameElements.levelFrame
+        local onCircle = circle and UF.ApplyLevelCircle(circle, UF.GetLevelSpot(Kind()), frameElements.background)
+        local textHome = levelFrame and levelFrame:GetParent()
+        if levelFrame then
+            -- Forever draws the level over the PvP badge, which sits one level above the text frame.
+            levelFrame:SetFrameLevel(textHome:GetFrameLevel() + 2)
+        end
+        if LevelText then
+            LevelText:ClearAllPoints()
+            if onCircle then
+                LevelText:SetParent(levelFrame)
+                LevelText:SetPoint("CENTER", circle, "CENTER", 0, UF.GetLevelTextY(levelFrame))
+            else
+                if textHome then
+                    LevelText:SetParent(textHome)
+                end
+                LevelText:SetPoint("BOTTOMRIGHT", HealthBar, "TOPLEFT", 18, 3)
+            end
+            LevelText:SetDrawLayer("OVERLAY", 2)
+            local font, size, flags = LevelText:GetFont()
+            levelTextSize = levelTextSize or size
+            if font then
+                LevelText:SetFont(font, onCircle and UF.LEVEL_ART.fontSize or opts.levelFontSize or levelTextSize, flags)
+            end
+        end
+        if HighLevelTexture and HealthBar then
+            if not skullHome then
+                skullHome = { HighLevelTexture:GetTexture(), HighLevelTexture:GetWidth(), HighLevelTexture:GetHeight() }
+            end
+            if onCircle then
+                HighLevelTexture:SetParent(levelFrame)
+            elseif textHome then
+                HighLevelTexture:SetParent(textHome)
+            end
+            HighLevelTexture:SetDrawLayer("ARTWORK")
+            local skull = onCircle and UF.LEVEL_ART.skull
+            HighLevelTexture:SetTexture(skull and UF.LEVEL_ART.file or skullHome[1])
+            if skull then
+                HighLevelTexture:SetTexCoord(unpack(skull.tc))
+            else
+                HighLevelTexture:SetTexCoord(0, 1, 0, 1)
+            end
+            HighLevelTexture:SetSize(skull and skull.w or skullHome[2], skull and skull.h or skullHome[3])
+            HighLevelTexture:ClearAllPoints()
+            if onCircle then
+                HighLevelTexture:SetPoint("CENTER", circle, "CENTER", 0, 0)
+            else
+                HighLevelTexture:SetPoint("BOTTOMRIGHT", HealthBar, "TOPLEFT", 18, 0)
+            end
+        end
+    end
+
+    -- TargetFrame_Update repaints the icon (crown, or the guide under LFG restrictions) every time it runs.
+    local function ApplyLeaderArt()
+        local leader = BlizzFrame.leaderIcon
+        if not leader then return end
+        local style = UF.GetStatusIconStyle()
+        local guide = HasLFGRestrictions and HasLFGRestrictions()
+        local spots = UF.IsCompact(configKey) and UF.COMPACT.target or UF.TARGET_ICONS
+        local spot = spots[(style == "forever" and not guide) and "foreverLeader" or "leader"]
+        leader:SetTexture(UF.STATUS_ICONS.file)
+        leader:SetTexCoord(unpack(guide and UF.STATUS_ICONS.guide or UF.STATUS_ICONS.leader[style]))
+        leader:SetSize(spot.w, spot.h)
+        leader:ClearAllPoints()
+        leader:SetPoint("TOPRIGHT", BlizzFrame, "TOPLEFT", spot.x, spot.y)
+    end
+
+    local pvpBadge, pvpKind
+
+    -- Portrait off, the combo column stands past the frame's end: the PvP emblem goes past it, the raid mark left.
+    local function PlacePvPIcon()
+        local compact = UF.IsCompact(configKey)
+        local circle = compact and UF.GetLevelSpot(Kind())
+        local combo = compact and configKey == "target" and UF.ComboOnCompactTarget and UF.ComboOnCompactTarget()
+        if compact and configKey == "target" then
+            local slot = UF.GetComboSlot()
+            slot:ClearAllPoints()
+            slot:SetPoint("CENTER", HealthBar, "TOPRIGHT", UF.CompactComboX(circle, compactDragon), UF.COMPACT.target.combo.bottom)
+        end
+        local raidTargetIcon = _G[namePrefix .. "FrameTextureFrameRaidTargetIcon"]
+        if compact and raidTargetIcon then
+            local x = UF.CompactRaidX(circle, compactDragon, combo, raidTargetIcon:GetWidth() / 2)
+            raidTargetIcon:ClearAllPoints()
+            raidTargetIcon:SetPoint("CENTER", BlizzFrame, "TOPLEFT", x, UF.COMPACT.target.raid.y)
+        end
+        if pvpBadge then
+            local spot = UF.GetFrameSkin()[Kind()].pvp
+            local x = compact and UF.CompactTargetBadgeX(spot.x, circle, compactDragon, combo, pvpBadge:GetWidth() / 2)
+            pvpBadge:ClearAllPoints()
+            pvpBadge:SetPoint("TOP", frameElements.background or BlizzFrame, "TOPLEFT", x or spot.x, spot.y)
+        end
+        -- TargetFrame.xml's anchor returns with the portrait.
+        local pvpIcon = BlizzFrame.pvpIcon
+        if pvpIcon and (compact or Module.pvpIconMoved) then
+            local x, y = 3, -20
+            if compact then
+                x, y = UF.CompactTargetPvPIcon(circle, compactDragon, pvpKind, combo)
+            end
+            pvpIcon:ClearAllPoints()
+            pvpIcon:SetPoint("TOPRIGHT", pvpIcon:GetParent(), "TOPRIGHT", x, y)
+            Module.pvpIconMoved = compact
+        end
+    end
+    if configKey == "target" then
+        UF.PlaceTargetPvPIcon = PlacePvPIcon
+    end
+
+    -- Retail's spots: the crown left of the portrait above the name strip, the raid mark centred on its top.
+    local function ApplyStatusIcons()
+        ApplyLeaderArt()
+        local raidTargetIcon = _G[namePrefix .. "FrameTextureFrameRaidTargetIcon"]
+        if raidTargetIcon and Portrait and not UF.IsCompact(configKey) then
+            raidTargetIcon:ClearAllPoints()
+            raidTargetIcon:SetPoint("CENTER", Portrait, "TOP", 0, 0)
+        end
+        -- Portrait off, the raid mark is placed with the PvP emblem.
+        PlacePvPIcon()
+    end
+
+    -- Above the frame's top; portrait off, centred over the bars or, with a dragon, left of its neck.
+    local function ApplyThreatNumericLayout()
+        local numeric = frameElements.threatNumeric
+        if not numeric then return end
+        local spot = { x = -45, y = -20 }
+        if UF.IsCompact(configKey) then
+            spot = compactDragon and UF.COMPACT.target.threatDragon or UF.COMPACT.target.threat
+        end
+        numeric:ClearAllPoints()
+        numeric:SetPoint("BOTTOM", BlizzFrame, "TOP", spot.x, spot.y)
+    end
+
+    -- TargetFrame's OnLoad cuts 96 off its mouse area's left (undone here); portrait off, it ends at the bars.
+    local function ApplyHitRect()
+        if UF.IsCompact(configKey) then
+            UF.SetHitRect(BlizzFrame, configKey .. "_hitrect", 0, 102, 20, 34)
+        else
+            UF.SetHitRect(BlizzFrame, configKey .. "_hitrect", 0, 40, 10, 20)
+        end
+    end
+
+    local function ApplySkinTextures()
+        local skin = UF.GetFrameSkin()[Kind()]
+        UF.ApplySkinPiece(frameElements.background, skin.background, "TOPLEFT", BlizzFrame, "TOPLEFT", 0, -8)
+        UF.ApplySkinPiece(frameElements.border, skin.border, "TOPLEFT", frameElements.background, "TOPLEFT", 0, 0)
+        local compact = UF.IsCompact(configKey)
+        if not compact then
+            compactDragon = nil
+        end
+        -- Kept as the bars' invisible anchor; uf_compact.lua's hooks keep it hidden while portrait off.
+        if Portrait and (compact or Module.portraitHidden) then
+            UF.KeepPortraitHidden(Portrait, configKey)
+            Portrait:SetAlpha(compact and 0 or 1)
+            Module.portraitHidden = compact
+        end
+        ApplyNameBackgroundLayout()
+        ApplyNameLayout()
+        ApplyLevelLayout()
+        ApplyStatusIcons()
+        ApplyThreatNumericLayout()
+        if ApplyThreatFlash then
+            ApplyThreatFlash()
+        end
+        ApplyHitRect()
+    end
+
+    -- ================================================================
     -- LAYOUT REAPPLY
     -- ================================================================
     -- Overrides Blizzard element repositioning that occurs for special
     -- units (bosses, vehicles). Used by target; not needed for focus.
 
     local function ForceReapplyLayout()
-        if Portrait then
-            Portrait:ClearAllPoints()
-            Portrait:SetSize(54, 54)
-            Portrait:SetPoint("TOPRIGHT", BlizzFrame, "TOPRIGHT", -47, -15)
-        end
-        if HealthBar then
-            HealthBar:ClearAllPoints()
-            HealthBar:SetSize(125, 20)
-            HealthBar:SetPoint("RIGHT", Portrait, "LEFT", -3, -1)
-            HealthBar:SetFrameLevel(BlizzFrame:GetFrameLevel())
-        end
-        if ManaBar then
-            ManaBar:ClearAllPoints()
-            ManaBar:SetSize(132, 9.5)
-            ManaBar:SetPoint("RIGHT", Portrait, "LEFT", 4.5, -17.5)
-            ManaBar:SetFrameLevel(BlizzFrame:GetFrameLevel())
-        end
-        if NameText then
-            NameText:ClearAllPoints()
-            NameText:SetPoint("BOTTOM", HealthBar, "TOP", 10, 3)
-        end
-        if LevelText then
-            LevelText:ClearAllPoints()
-            LevelText:SetPoint("BOTTOMRIGHT", HealthBar, "TOPLEFT", 18, 3)
-        end
-        if HighLevelTexture and HealthBar then
-            HighLevelTexture:ClearAllPoints()
-            HighLevelTexture:SetPoint("BOTTOMRIGHT", HealthBar, "TOPLEFT", 18, 0)
-        end
+        ApplyBarsLayout()
+        ApplyNameLayout()
+        ApplyLevelLayout()
         if NameBackground then
             ApplyNameBackgroundLayout()
         end
@@ -483,15 +676,18 @@ function UF.TargetStyle.Create(opts)
             end)
             ManaBar:SetStatusBarColor(1, 1, 1, 1)
 
+            local shownPower
+
             -- Update texture & coords on every value change
-            hooksecurefunc(ManaBar, "SetValue", function(self)
+            hooksecurefunc(ManaBar, "SetValue", function(self, value)
+                shownPower = value
                 if not UnitExists(unitToken) then return end
                 local texture = self:GetStatusBarTexture()
                 if not texture then return end
 
                 local powerType = UnitPowerType(unitToken)
                 local powerName = POWER_MAP[powerType] or "Mana"
-                texture:SetTexture(TEXTURES.BAR_PREFIX .. powerName)
+                texture:SetTexture(BarPrefix() .. powerName)
                 texture:SetDrawLayer("ARTWORK", 1)
                 texture:SetVertexColor(1, 1, 1)
                 ManaBar:SetStatusBarColor(1, 1, 1)
@@ -501,6 +697,13 @@ function UF.TargetStyle.Create(opts)
                 if max > 0 and cur then
                     texture:SetTexCoord(0, cur / max, 0, 1)
                 end
+            end)
+
+            -- Blizzard polls only player/pet/vehicle; targeting yourself, predicted regen fires no UNIT_ENERGY.
+            ManaBar:HookScript("OnUpdate", function(self)
+                if self.disconnected or self.lockValues or not UnitExists(unitToken) then return end
+                local value = UnitPower(unitToken, self.powerType)
+                if value ~= shownPower then self:SetValue(value) end
             end)
             ManaBar.DragonUI_Setup = true
         end
@@ -614,6 +817,64 @@ function UF.TargetStyle.Create(opts)
     -- CLASSIFICATION SYSTEM
     -- ================================================================
 
+    local function ShowDragon(kind)
+        local elite = frameElements.elite
+        local compact = UF.IsCompact(configKey)
+        local file, left, right, top, bottom, place
+        if kind and compact then
+            -- The small focus has no room for one.
+            place = not (configKey == "focus" and BlizzFrame.smallSize) and UF.GetCompactDragon(kind) or nil
+            file = place and place.file
+        elseif kind then
+            file, left, right, top, bottom, place = UF.GetDragon("target", kind)
+        end
+        if compact and place ~= compactDragon then
+            compactDragon = place
+            ApplyNameLayout()
+            ApplyLevelLayout()
+            ApplyStatusIcons()
+            ApplyThreatNumericLayout()
+        end
+        if not file then
+            elite:Hide()
+            return
+        end
+        elite:SetTexture(file)
+        elite:SetSize(place.w, place.h)
+        elite:ClearAllPoints()
+        local paw = frameElements.elitePaw
+        if compact then
+            -- Bent round the frame's right end on TargetFrame: over the background, under the rims and bars.
+            elite:SetParent(BlizzFrame)
+            elite:SetDrawLayer("ARTWORK")
+            elite:SetTexCoord(unpack(place.tc))
+            elite:SetPoint("TOPLEFT", HealthBar, "TOPRIGHT", place.x, place.y)
+            -- A Forever paw grips the bottom rim from above it (eliteFrame sits over the border).
+            if paw and place.pawFile then
+                paw:SetTexture(place.pawFile)
+                paw:SetTexCoord(unpack(place.tc))
+                paw:SetSize(place.w, place.h)
+                paw:ClearAllPoints()
+                paw:SetPoint("TOPLEFT", HealthBar, "TOPRIGHT", place.x, place.y)
+                paw:Show()
+            elseif paw then
+                paw:Hide()
+            end
+        else
+            if paw then paw:Hide() end
+            elite:SetParent(frameElements.eliteFrame)
+            elite:SetDrawLayer("ARTWORK", 1)
+            elite:SetTexCoord(left, right, top, bottom)
+            elite:SetPoint("CENTER", Portrait, "CENTER", place.x, place.y)
+        end
+        elite:Show()
+    end
+
+    -- The editor previews an elite on the target only; UF.PreviewClassification lets tests pick another.
+    local function PreviewDragon()
+        ShowDragon(configKey == "target" and (UF.PreviewClassification or "elite") or nil)
+    end
+
     local function UpdateClassification()
         local raidTargetIcon = _G[namePrefix .. "FrameTextureFrameRaidTargetIcon"]
         if raidTargetIcon and raidTargetIcon.SetDrawLayer then
@@ -625,6 +886,11 @@ function UF.TargetStyle.Create(opts)
             pvpIcon:SetDrawLayer("OVERLAY", 7)
         end
 
+        if frameElements.elite and addon.TextSystem.IsEditorActive() then
+            PreviewDragon()
+            return
+        end
+
         if not UnitExists(unitToken) or not frameElements.elite then
             if frameElements.elite then frameElements.elite:Hide() end
             return
@@ -632,43 +898,32 @@ function UF.TargetStyle.Create(opts)
 
         local classification = UnitClassification(unitToken)
         local name   = UnitName(unitToken)
-        local coords = nil
+        local kind = nil
 
         if classification == "worldboss" then
-            coords = BOSS_COORDS.rareelite
+            kind = "boss"
         elseif classification == "elite" then
-            coords = BOSS_COORDS.elite
+            kind = "elite"
         elseif classification == "rareelite" then
-            coords = BOSS_COORDS.rareelite
+            kind = "rareelite"
         elseif classification == "rare" then
-            coords = BOSS_COORDS.rare
+            kind = "rare"
         else
             -- Fallback: famous NPC or skull-level boss
             if name and UF.FAMOUS_NPCS[name] then
-                coords = BOSS_COORDS.elite
+                kind = "elite"
                 if opts.onFamousNpc then
                     opts.onFamousNpc(name, updateCache)
                 end
             else
                 local unitLevel = UnitLevel(unitToken)
                 if unitLevel == -1 then
-                    coords = BOSS_COORDS.rareelite
+                    kind = "boss"
                 end
             end
         end
 
-        if coords then
-            frameElements.elite:SetDrawLayer("ARTWORK", 1)
-            frameElements.elite:SetTexCoord(
-                coords[1], coords[2], coords[3], coords[4])
-            frameElements.elite:SetSize(coords[5], coords[6])
-            frameElements.elite:ClearAllPoints()
-            frameElements.elite:SetPoint(
-                "CENTER", Portrait, "CENTER", coords[7] - 1, coords[8] - 1)
-            frameElements.elite:Show()
-        else
-            frameElements.elite:Hide()
-        end
+        ShowDragon(kind)
     end
 
     local function QueueClassificationRefresh(delay)
@@ -698,7 +953,11 @@ function UF.TargetStyle.Create(opts)
                         UpdateClassification()
                     end
                 elseif frameElements.elite then
-                    frameElements.elite:Hide()
+                    if addon.TextSystem.IsEditorActive() then
+                        PreviewDragon()
+                    else
+                        frameElements.elite:Hide()
+                    end
                 end
 
                 if self.passes >= self.maxPasses then
@@ -711,6 +970,20 @@ function UF.TargetStyle.Create(opts)
     -- ================================================================
     -- NAME BACKGROUND
     -- ================================================================
+
+    local function PaintNameBackground(r, g, b, tapDenied)
+        local piece = UF.GetFrameSkin()[Kind()].nameBackground
+        local tapped = tapDenied and piece.tapped
+        local cell = piece.cells[tapped and tapped.cell or ResolveNameBackgroundColorKey(r, g, b)]
+        local color = tapped and tapped.color or piece.color
+        NameBackground:SetTexture(piece.file)
+        NameBackground:SetTexCoord(unpack(cell or piece.cells.yellow))
+        NameBackground:SetBlendMode(tapped and tapped.blend or piece.blend)
+        if NameBackground.SetDesaturated then
+            NameBackground:SetDesaturated(tapped and tapped.desaturate or false)
+        end
+        NameBackground:SetVertexColor(color[1], color[2], color[3], opts.nameVertexAlpha or 1)
+    end
 
     local function UpdateNameBackground()
         if not NameBackground then return end
@@ -728,7 +1001,6 @@ function UF.TargetStyle.Create(opts)
 
         local r, g, b
         local isTapDenied = false
-        -- Tap-denied check (target only)
         if opts.hasTapDenied
            and UnitIsTapped(unitToken)
            and not UnitIsTappedByPlayer(unitToken) then
@@ -738,35 +1010,62 @@ function UF.TargetStyle.Create(opts)
             r, g, b = UnitSelectionColor(unitToken)
         end
 
-        local colorKey = isTapDenied and "green" or ResolveNameBackgroundColorKey(r, g, b)
-        local coords = NAME_BG_TEX_COORDS[colorKey] or NAME_BG_TEX_COORDS.yellow
-
-        NameBackground:SetTexture(NAME_BG_PTR_TEXTURE)
-        NameBackground:SetTexCoord(unpack(coords))
-        if isTapDenied then
-            NameBackground:SetBlendMode("BLEND")
-        else
-            NameBackground:SetBlendMode("ADD")
-        end
-        if NameBackground.SetDesaturated then
-            NameBackground:SetDesaturated(isTapDenied)
-        end
-
-        if isTapDenied then
-            if opts.nameVertexAlpha then
-                NameBackground:SetVertexColor(0.08, 0.08, 0.08, opts.nameVertexAlpha)
-            else
-                NameBackground:SetVertexColor(0.08, 0.08, 0.08, 1)
-            end
-        else
-            if opts.nameVertexAlpha then
-                NameBackground:SetVertexColor(1, 1, 1, opts.nameVertexAlpha)
-            else
-                NameBackground:SetVertexColor(1, 1, 1, 1)
-            end
-        end
-
+        PaintNameBackground(r, g, b, isTapDenied)
         NameBackground:Show()
+    end
+
+    -- ================================================================
+    -- PVP ICON
+    -- ================================================================
+
+    -- Runs after TargetFrame_CheckFaction, the only code that shows the icon; a small focus clears showPVP.
+    local function ApplyPvPIconVisibility()
+        local pvpIcon = BlizzFrame.pvpIcon
+        if not pvpIcon then return end
+        local config = GetConfig()
+        local kind = BlizzFrame.showPVP and UnitExists(unitToken) and UF.GetPvPKind(unitToken)
+        local fake = not UnitExists(unitToken) and addon.TextSystem.IsEditorActive()
+        if fake then
+            -- No real unit to flag, so the editor shows the player's faction emblem.
+            kind = BlizzFrame.showPVP ~= false and (UnitFactionGroup("player") or "Alliance") or nil
+        end
+        local shown = kind and config.show_pvp_icon ~= false
+        UF.ApplyClassicPvPTexture(pvpIcon, kind)
+        if not pvpBadge then
+            -- Same frame as Blizzard's icon, so it draws over the portrait the same way.
+            pvpBadge = UF.CreatePvPBadge(pvpIcon:GetParent(), "DragonUI_" .. namePrefix .. "PvPCircle")
+        end
+        local onBadge = shown and UF.GetPvPIconStyle(config) == "forever"
+            and UF.ShowPvPBadge(pvpBadge, kind, UF.GetFrameSkin()[Kind()].pvp.scale, true)
+        if not onBadge then
+            pvpBadge:Hide()
+        end
+        -- After ShowPvPBadge sizes the badge: portrait off, each emblem's width sets its spot.
+        pvpKind = kind
+        PlacePvPIcon()
+        -- Alpha only: TargetFrame_CheckFaction owns Show/Hide, including the small focus that never shows it.
+        pvpIcon:SetAlpha((shown and not onBadge) and 1 or 0)
+        if fake then pvpIcon:Show() end
+    end
+
+    -- ================================================================
+    -- THREAT FLASH
+    -- ================================================================
+
+    -- Show/Hide and color stay with UnitFrame_UpdateThreatIndicator.
+    function ApplyThreatFlash()
+        local flash = BlizzFrame.threatIndicator
+        if not flash or not frameElements.eliteFrame then return end
+        -- On eliteFrame like retail's: over the border, under the elite dragon.
+        flash:SetParent(frameElements.eliteFrame)
+        flash:SetDrawLayer("BACKGROUND")
+        -- Portrait off, the same contour without the ring (uf_compact.lua).
+        local spot = UF.GetFrameSkin()[Kind()].flash
+        flash:SetTexture(spot.file or TEXTURES.THREAT)
+        flash:SetTexCoord(0, 376/512, 0, 134/256)
+        flash:ClearAllPoints()
+        flash:SetPoint("BOTTOMLEFT", BlizzFrame, "BOTTOMLEFT", spot.x, spot.y)
+        flash:SetSize(188, 67)
     end
 
     -- ================================================================
@@ -817,9 +1116,6 @@ function UF.TargetStyle.Create(opts)
         if not frameElements.background then
             frameElements.background = BlizzFrame:CreateTexture(
                 "DragonUI_" .. namePrefix .. "BG", "BACKGROUND", nil, -7)
-            frameElements.background:SetTexture(TEXTURES.BACKGROUND)
-            frameElements.background:SetPoint(
-                "TOPLEFT", BlizzFrame, "TOPLEFT", 0, -8)
         end
 
         -- ---- Create border+elite frame (above health/mana bars) ----
@@ -834,10 +1130,16 @@ function UF.TargetStyle.Create(opts)
         if not frameElements.border then
             frameElements.border = frameElements.borderFrame:CreateTexture(
                 "DragonUI_" .. namePrefix .. "Border", "OVERLAY", nil, 5)
-            frameElements.border:SetTexture(TEXTURES.BORDER)
-            frameElements.border:SetPoint(
-                "TOPLEFT", frameElements.background, "TOPLEFT", 0, 0)
         end
+        -- Above the text frame (border, dragons) and the PvP badge; text and skull move in with the circle.
+        if not frameElements.levelFrame then
+            local lf = CreateFrame("Frame", nil, _G[namePrefix .. "FrameTextureFrame"])
+            lf:SetAllPoints(BlizzFrame)
+            frameElements.levelFrame = lf
+            frameElements.levelCircle = lf:CreateTexture("DragonUI_" .. namePrefix .. "LevelCircle", "BACKGROUND")
+            frameElements.levelCircle:Hide()
+        end
+        ApplySkinTextures()
 
         -- ---- Create elite decoration (above border) ----
         if not frameElements.eliteFrame then
@@ -849,9 +1151,22 @@ function UF.TargetStyle.Create(opts)
         if not frameElements.elite then
             frameElements.elite = frameElements.eliteFrame:CreateTexture(
                 "DragonUI_" .. namePrefix .. "Elite", "ARTWORK", nil, 1)
-            frameElements.elite:SetTexture(TEXTURES.BOSS)
             frameElements.elite:Hide()
+            local paw = frameElements.eliteFrame:CreateTexture("DragonUI_" .. namePrefix .. "ElitePaw", "ARTWORK")
+            paw:Hide()
+            frameElements.elitePaw = paw
+            -- Wherever the dragon goes away, its paw goes with it.
+            hooksecurefunc(frameElements.elite, "Hide", function() paw:Hide() end)
+            if configKey == "target" then
+                -- combopoints.lua's arc steps round a dragon.
+                local function DragonMoved()
+                    if UF.OnTargetDragon then UF.OnTargetDragon() end
+                end
+                hooksecurefunc(frameElements.elite, "Show", DragonMoved)
+                hooksecurefunc(frameElements.elite, "Hide", DragonMoved)
+            end
         end
+        ApplyThreatFlash()
 
         local raidTargetIcon = _G[namePrefix .. "FrameTextureFrameRaidTargetIcon"]
         if raidTargetIcon and raidTargetIcon.SetDrawLayer then
@@ -877,7 +1192,6 @@ function UF.TargetStyle.Create(opts)
             numeric:SetFrameStrata("HIGH")
             numeric:SetFrameLevel(BlizzFrame:GetFrameLevel() + 10)
             numeric:SetSize(71, 13)
-            numeric:SetPoint("BOTTOM", BlizzFrame, "TOP", -45, -20)
             numeric:Hide()
 
             local bg = numeric:CreateTexture(nil, "ARTWORK")
@@ -893,17 +1207,12 @@ function UF.TargetStyle.Create(opts)
 
             frameElements.threatNumeric = numeric
         end
+        ApplyThreatNumericLayout()
 
         -- ---- Configure name background ----
         if NameBackground then
             ApplyNameBackgroundLayout()
-            NameBackground:SetTexture(NAME_BG_PTR_TEXTURE)
-            NameBackground:SetTexCoord(unpack(NAME_BG_TEX_COORDS.green))
-            NameBackground:SetBlendMode("ADD")
-            if NameBackground.SetDesaturated then
-                NameBackground:SetDesaturated(false)
-            end
-            NameBackground:SetVertexColor(1, 1, 1, 1)
+            PaintNameBackground(0, 1, 0, false)
             NameBackground:SetDrawLayer("BORDER", 1)
             if opts.nameFrameAlpha then
                 NameBackground:SetAlpha(opts.nameFrameAlpha)
@@ -911,33 +1220,19 @@ function UF.TargetStyle.Create(opts)
         end
 
         -- ---- Configure portrait ----
-        -- 54px fits inside the border's ring; bar and elite offsets absorb the 2px so they don't move.
-        Portrait:ClearAllPoints()
-        Portrait:SetSize(54, 54)
-        Portrait:SetPoint("TOPRIGHT", BlizzFrame, "TOPRIGHT", -47, -15)
+        ApplyPortraitLayout()
         Portrait:SetDrawLayer("ARTWORK", 0)
 
-        -- TargetFrame's OnLoad cuts 96px off its left hit rect; undo it so the button covers the bars.
-        BlizzFrame:SetHitRectInsets(0, 40, 10, 20)
+        ApplyHitRect()
 
         -- ---- Configure health bar ----
         -- Frame level -1 keeps bar fills below portrait area (level 0)
         -- so the mana bar overlap doesn't render on top of the portrait.
-        HealthBar:ClearAllPoints()
-        HealthBar:SetSize(125, 20)
-        HealthBar:SetPoint("RIGHT", Portrait, "LEFT", -3, -1)
-        HealthBar:SetFrameLevel(BlizzFrame:GetFrameLevel())
-
-        -- ---- Configure power bar ----
-        ManaBar:ClearAllPoints()
-        ManaBar:SetSize(132, 9.5)
-        ManaBar:SetPoint("RIGHT", Portrait, "LEFT", 4.5, -17.5)
-        ManaBar:SetFrameLevel(BlizzFrame:GetFrameLevel())
+        ApplyBarsLayout()
 
         -- ---- Configure text elements ----
         if NameText then
-            NameText:ClearAllPoints()
-            NameText:SetPoint("BOTTOM", HealthBar, "TOP", 10, 3)
+            ApplyNameLayout()
             NameText:SetDrawLayer("OVERLAY", 2)
             if opts.nameFontSize then
                 local font, _, flags = NameText:GetFont()
@@ -948,8 +1243,6 @@ function UF.TargetStyle.Create(opts)
         end
 
         if LevelText then
-            LevelText:ClearAllPoints()
-            LevelText:SetPoint("BOTTOMRIGHT", HealthBar, "TOPLEFT", 18, 3)
             LevelText:SetDrawLayer("OVERLAY", 2)
             if opts.levelFontSize then
                 local font, _, flags = LevelText:GetFont()
@@ -958,10 +1251,7 @@ function UF.TargetStyle.Create(opts)
                 end
             end
         end
-        if HighLevelTexture and HealthBar then
-            HighLevelTexture:ClearAllPoints()
-            HighLevelTexture:SetPoint("BOTTOMRIGHT", HealthBar, "TOPLEFT", 18, 0)
-        end
+        ApplyLevelLayout()
 
         if DeadText then
             DeadText:ClearAllPoints()
@@ -979,10 +1269,29 @@ function UF.TargetStyle.Create(opts)
         if not BlizzFrame.DragonUI_ClassificationHook then
             hooksecurefunc("TargetFrame_CheckClassification", function(self, forceNormal)
                 if self == BlizzFrame then
+                    ApplyThreatFlash()
                     UpdateClassification()
                 end
             end)
             BlizzFrame.DragonUI_ClassificationHook = true
+        end
+
+        if not BlizzFrame.DragonUI_PvPIconHook then
+            hooksecurefunc("TargetFrame_CheckFaction", function(self)
+                if self == BlizzFrame then
+                    ApplyPvPIconVisibility()
+                end
+            end)
+            BlizzFrame.DragonUI_PvPIconHook = true
+        end
+
+        if not BlizzFrame.DragonUI_LeaderArtHook then
+            hooksecurefunc("TargetFrame_Update", function(self)
+                if self == BlizzFrame then
+                    ApplyLeaderArt()
+                end
+            end)
+            BlizzFrame.DragonUI_LeaderArtHook = true
         end
 
         -- ---- Apply config (scale + position) ----
@@ -990,6 +1299,7 @@ function UF.TargetStyle.Create(opts)
         if not InCombatLockdown() then
             BlizzFrame:SetClampedToScreen(false)
             BlizzFrame:SetScale(config.scale or 1)
+            addon.SetEditorBoxScale(Module.overlay, config.scale or 1)
         end
         ApplyWidgetPosition()
 
@@ -1038,20 +1348,12 @@ function UF.TargetStyle.Create(opts)
                 -- Name background with player color
                 if NameBackground then
                     local r, g, b = UnitSelectionColor("player")
-                    local colorKey = ResolveNameBackgroundColorKey(r, g, b)
-                    local coords = NAME_BG_TEX_COORDS[colorKey] or NAME_BG_TEX_COORDS.yellow
-                    NameBackground:SetTexture(NAME_BG_PTR_TEXTURE)
-                    NameBackground:SetTexCoord(unpack(coords))
-                    NameBackground:SetBlendMode("ADD")
-                    if NameBackground.SetDesaturated then
-                        NameBackground:SetDesaturated(false)
-                    end
-                    if opts.nameVertexAlpha then
-                        NameBackground:SetVertexColor(1, 1, 1, opts.nameVertexAlpha)
+                    PaintNameBackground(r, g, b, false)
+                    if GetConfig().show_name_background == false then
+                        NameBackground:Hide()
                     else
-                        NameBackground:SetVertexColor(1, 1, 1, 1)
+                        NameBackground:Show()
                     end
-                    NameBackground:Show()
                 end
 
                 -- Name & level text (preserve original color)
@@ -1068,7 +1370,11 @@ function UF.TargetStyle.Create(opts)
                         LevelText.originalColor = {r, g, b, a}
                     end
                     LevelText:SetText(UnitLevel("player"))
+                    LevelText:Show()
                 end
+                -- The empty unit reads as dead and level ??, which would draw "Dead" and the skull.
+                if DeadText then DeadText:Hide() end
+                if HighLevelTexture then HighLevelTexture:Hide() end
 
                 -- Health bar with class color system
                 if HealthBar then
@@ -1082,7 +1388,7 @@ function UF.TargetStyle.Create(opts)
                         local cfg = GetConfig()
                         if cfg.classcolor then
                             tex:SetTexture(
-                                TEXTURES.BAR_PREFIX .. "Health-Status")
+                                BarPrefix() .. "Health-Status")
                             local _, cls = UnitClass("player")
                             local clr = RAID_CLASS_COLORS[cls]
                             if clr then
@@ -1093,7 +1399,7 @@ function UF.TargetStyle.Create(opts)
                             end
                         else
                             tex:SetTexture(
-                                TEXTURES.BAR_PREFIX .. "Health")
+                                BarPrefix() .. "Health")
                             tex:SetVertexColor(1, 1, 1, 1)
                         end
                         if maxHP > 0 then
@@ -1114,7 +1420,7 @@ function UF.TargetStyle.Create(opts)
                     local tex = ManaBar:GetStatusBarTexture()
                     if tex then
                         local pName = POWER_MAP[pType] or "Mana"
-                        tex:SetTexture(TEXTURES.BAR_PREFIX .. pName)
+                        tex:SetTexture(BarPrefix() .. pName)
                         tex:SetDrawLayer("ARTWORK", 1)
                         tex:SetVertexColor(1, 1, 1, 1)
                         if maxPwr > 0 then
@@ -1124,40 +1430,17 @@ function UF.TargetStyle.Create(opts)
                     ManaBar:Show()
                 end
 
-                -- Elite decoration
                 if frameElements.elite then
-                    local classification = UnitClassification("player")
-                    local pName   = UnitName("player")
-                    local eCoords = nil
-
-                    if pName and UF.FAMOUS_NPCS[pName] then
-                        eCoords = BOSS_COORDS.elite
-                    elseif classification
-                           and classification ~= "normal" then
-                        eCoords = BOSS_COORDS[classification]
-                                  or BOSS_COORDS.elite
-                    end
-
-                    if eCoords then
-                        frameElements.elite:SetTexCoord(
-                            eCoords[1], eCoords[2],
-                            eCoords[3], eCoords[4])
-                        frameElements.elite:SetSize(
-                            eCoords[5], eCoords[6])
-                        frameElements.elite:ClearAllPoints()
-                        frameElements.elite:SetPoint(
-                            "CENTER", Portrait, "CENTER",
-                            eCoords[7] - 1, eCoords[8] - 1)
-                        frameElements.elite:Show()
-                    else
-                        frameElements.elite:Hide()
-                    end
+                    PreviewDragon()
                 end
 
                 -- Hide threat in test mode
                 if frameElements.threatNumeric then
                     frameElements.threatNumeric:Hide()
                 end
+
+                ApplyPvPIconVisibility()
+                if Module.textSystem then Module.textSystem.update() end
             end
 
             BlizzFrame.HideTest = function(self)
@@ -1376,6 +1659,15 @@ function UF.TargetStyle.Create(opts)
         local config = GetConfig()
         if not InCombatLockdown() then
             BlizzFrame:SetScale(config.scale or 1)
+            addon.SetEditorBoxScale(Module.overlay, config.scale or 1)
+        end
+
+        if frameElements.border then
+            ApplySkinTextures()
+        end
+        if Module.appliedLayout and Module.appliedLayout ~= UF.GetFrameSkin()[Kind()]
+                and not InCombatLockdown() then
+            ApplyBarsLayout()
         end
 
         ApplyWidgetPosition()
@@ -1394,8 +1686,12 @@ function UF.TargetStyle.Create(opts)
             UpdateHealthBarColor()
             ForceUpdatePowerBar()
             if Module.textSystem then Module.textSystem.update() end
+        elseif addon.TextSystem.IsEditorActive() and BlizzFrame.ShowTest then
+            -- The fake frame has no unit to read, so a setting change repaints it from the player.
+            BlizzFrame:ShowTest()
         end
 
+        ApplyPvPIconVisibility()
         SyncVisibilityFade()
     end
 
@@ -1419,6 +1715,7 @@ function UF.TargetStyle.Create(opts)
         if not InCombatLockdown() then
             BlizzFrame:ClearAllPoints()
             BlizzFrame:SetScale(config.scale or 1)
+            addon.SetEditorBoxScale(Module.overlay, config.scale or 1)
         end
         ApplyWidgetPosition()
     end

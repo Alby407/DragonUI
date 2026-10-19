@@ -222,6 +222,18 @@ local function BuildGeneralTab(scroll)
         callback = RefreshBars,
     })
 
+    C:AddDropdown(buttons, {
+        label = LO["Button Tooltips"],
+        desc = LO["When to show tooltips on action, pet and stance buttons."],
+        dbPath = "buttons.tooltips",
+        values = {
+            always = LO["Always"],
+            combat = LO["Hide in Combat"],
+            never  = LO["Never"],
+        },
+        width = 200,
+    })
+
     -- Text visibility sub-section
     local textVis = C:AddSection(scroll, LO["Text Visibility"])
 
@@ -267,6 +279,12 @@ local function BuildGeneralTab(scroll)
         min = 1, max = 10, step = 1,
         width = 200,
         callback = RefreshCooldowns,
+    })
+
+    C:AddToggle(cdSection, {
+        label = LO["Whole Seconds"],
+        tooltip = LO["Show cooldown text in whole seconds, without the tenths under 5 seconds."],
+        dbPath = "buttons.cooldown.whole_seconds",
     })
 
     C:AddSlider(cdSection, {
@@ -373,10 +391,11 @@ local function BuildGeneralTab(scroll)
         label = LO["Style"],
         dbPath = "style.gryphons",
         values = {
-            old    = LO["Classic"],
-            new    = LO["Dragonflight"],
-            flying = LO["Flying"],
-            none   = LO["Hidden"],
+            old     = LO["Classic"],
+            new     = LO["Dragonflight"],
+            flying  = LO["Flying"],
+            forever = LO["Forever"],
+            none    = LO["Hidden"],
         },
         width = 200,
         callback = function()
@@ -454,6 +473,16 @@ local function BuildGeneralTab(scroll)
             texCoord = { 1/256, 158/256, 149/2048, 342/2048 },
             width = 70,
             height = 90,
+        })
+
+        -- WoW Forever preview (faction-aware like Dragonflight: gryphon=Alliance, wyvern=Horde)
+        C:AddTexturePreview(previewRow, {
+            label = LO["Forever"],
+            texture = assets .. "ActionBars\\uiactionbar2x_forever",
+            texCoord = faction == "Horde" and { 1/1024, 481/1024, 283/1024, 563/1024 }
+                or { 1/1024, 481/1024, 1/1024, 281/1024 },
+            width = 96,
+            height = 56,
         })
     end
 end
@@ -909,12 +938,18 @@ local function BuildVisibilityTab(scroll)
     C:AddToggle(enableSection, {
         label = LO["Right Bar"],
         dbPath = "actionbars.right_enabled",
-        callback = RefreshVisibility,
+        callback = function(value)
+            -- Blizzard greys the left bar out and turns it off with the right one.
+            if not value then C:SetDBValue("actionbars.left_enabled", false) end
+            RefreshVisibility()
+            Panel:SelectTab("actionbars")
+        end,
     })
 
     C:AddToggle(enableSection, {
         label = LO["Left Bar"],
         dbPath = "actionbars.left_enabled",
+        disabled = function() return C:GetDBValue("actionbars.right_enabled") == false end,
         callback = RefreshVisibility,
     })
 

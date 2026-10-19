@@ -11,17 +11,24 @@ local SHEET = addon._dir .. "UI\\redbutton3slice"
 local CAP_W, ART_H = 114, 128
 
 local STATES = {
-    NORMAL = { cap = { 0.763672, 0.986328, 0.444824, 0.507324 }, mid = { 0, 0.125, 0.000488, 0.062988 } },
-    PUSHED = { cap = { 0.763672, 0.986328, 0.571777, 0.634277 }, mid = { 0, 0.125, 0.127441, 0.189941 } },
-    DISABLED = { cap = { 0.763672, 0.986328, 0.508301, 0.570801 }, mid = { 0, 0.125, 0.063965, 0.126465 } },
+    NORMAL = { cap = { 4/256, 61/256, 76/256, 140/256 }, mid = { 4/256, 36/256, 148/256, 212/256 } },
+    PUSHED = { cap = { 136/256, 193/256, 76/256, 140/256 }, mid = { 84/256, 116/256, 148/256, 212/256 } },
+    DISABLED = { cap = { 70/256, 127/256, 76/256, 140/256 }, mid = { 44/256, 76/256, 148/256, 212/256 } },
 }
 
 -- One strip holding all three pieces, so a cap's share is its width over the assembled 441.
-local HL_LEFT, HL_RIGHT, HL_TOP, HL_BOTTOM = 0.001953, 0.863281, 0.190918, 0.253418
+local HL_LEFT, HL_RIGHT, HL_TOP, HL_BOTTOM = 4/256, 225/256, 4/256, 68/256
 local HL_CAP = (HL_RIGHT - HL_LEFT) * (CAP_W / 441)
 
+-- 3.3.5a's IsEnabled returns 1/0, and 0 is truthy in Lua, so `not IsEnabled()` never fires.
+local function isDisabled(btn)
+    if not btn.IsEnabled then return false end
+    local enabled = btn:IsEnabled()
+    return not enabled or enabled == 0
+end
+
 local function stateOf(btn)
-    if btn.IsEnabled and not btn:IsEnabled() then return "DISABLED" end
+    if isDisabled(btn) then return "DISABLED" end
     if btn.GetButtonState and btn:GetButtonState() == "PUSHED" then return "PUSHED" end
     return "NORMAL"
 end
@@ -88,7 +95,7 @@ function addon.SkinRedButton(btn)
 
     skin.middle = btn:CreateTexture(nil, "BACKGROUND")
     skin.middle:SetTexture(SHEET)
-    skin.middle:SetHorizTile(true)
+    -- No SetHorizTile: on resize 3.3.5a re-tiles from the sheet's corner and drops this piece's texcoords.
     skin.middle:SetPoint("TOPLEFT", skin.left, "TOPRIGHT", 0, 0)
     skin.middle:SetPoint("BOTTOMRIGHT", skin.right, "BOTTOMLEFT", 0, 0)
 
@@ -106,7 +113,7 @@ function addon.SkinRedButton(btn)
     skin.hlMiddle = highlight(skin.middle, nil, HL_LEFT + HL_CAP, HL_RIGHT - HL_CAP)
 
     btn:HookScript("OnEnter", function(self)
-        if self.IsEnabled and not self:IsEnabled() then return end
+        if isDisabled(self) then return end
         skin.hlLeft:Show(); skin.hlRight:Show(); skin.hlMiddle:Show()
     end)
     btn:HookScript("OnLeave", function(self)
@@ -115,7 +122,7 @@ function addon.SkinRedButton(btn)
         apply(self)
     end)
     btn:HookScript("OnMouseDown", function(self)
-        if self.IsEnabled and not self:IsEnabled() then return apply(self, "DISABLED") end
+        if isDisabled(self) then return apply(self, "DISABLED") end
         apply(self, "PUSHED")
     end)
     -- Next frame: GetButtonState can still read PUSHED inside OnMouseUp, which re-pins the art.

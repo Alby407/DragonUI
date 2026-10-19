@@ -123,6 +123,10 @@ local function mapBadges()
             }
         end
     end
+    -- A held map has no Blizzard rows; pins.lua numbered its quests the way they would have been.
+    for _, row in ipairs(WM.HeldQuestRows()) do
+        badges[row.questLogIndex] = { frame = row, number = row.number, completed = row.completed }
+    end
     return badges
 end
 
@@ -492,12 +496,18 @@ local function clearBlobs()
     end
 end
 
-WM.ClearBlobs = clearBlobs
-
 -- The blob is rasterised where it was drawn and never travels, so moving the canvas re-lays it.
 function WM.RefreshBlobs()
     clearBlobs()
     applyBlob()
+end
+
+-- Only the shapes on the canvas, so a drag can afford it every frame it moves.
+function WM.RedrawBlobs()
+    for questID in pairs(drawn) do
+        WorldMapBlobFrame:DrawQuestBlob(questID, false)
+        WorldMapBlobFrame:DrawQuestBlob(questID, true)
+    end
 end
 
 -- Outside our windowed chrome the canvas is Blizzard's, and wiping the shape it drew is not ours to do.
@@ -755,6 +765,12 @@ local function repaint()
                 break
             end
         end
+        for _, row in ipairs(WM.HeldQuestRows()) do
+            if row.questId == lastFocus then
+                QP.SetFocus(lastFocus)
+                break
+            end
+        end
     end
     local wasHovering = hoveredRow and hoveredRow._questID
     hoverRow(nil, false)
@@ -900,7 +916,7 @@ local function buildSearch()
     glow:SetBlendMode("ADD")
     glow:SetAlpha(0.4)
     cog:SetScript("OnClick", function(self)
-        addon.Menu.Open(self, {
+        local entries = {
             { text = L["Panel settings"], isTitle = true },
             {
                 text = QUEST_OBJECTIVES,
@@ -911,7 +927,9 @@ local function buildSearch()
                     requestRepaint()
                 end,
             },
-        })
+        }
+        WM.AddGroupPinEntries(entries)
+        addon.Menu.Open(self, entries)
     end)
     cog:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
@@ -1044,16 +1062,18 @@ function WM.BuildQuestLog()
         reclaimBlob(questFrame)
         requestRepaint()
     end)
-    -- The canvas pin is Blizzard's own button, and its click is the one pick that comes through no row.
-    hooksecurefunc("WorldMapQuestPOI_OnClick", function(self)
-        if not ownsCanvas() then return end
-        local questID = self.quest and self.quest.questId
-        if not questID or questID == 0 then return end
+    -- A canvas pin, Blizzard's or a held map's own, is the one pick that comes through no row.
+    local function pickFromCanvas(questID)
+        if not ownsCanvas() or not questID or questID == 0 then return end
         lastFocus = questID
         QP.SetFocus(questID)
         applyBlob()
         requestRepaint()
+    end
+    hooksecurefunc("WorldMapQuestPOI_OnClick", function(self)
+        pickFromCanvas(self.quest and self.quest.questId)
     end)
+    WM.PickQuestFromCanvas = pickFromCanvas
 
     local events = CreateFrame("Frame")
     events:RegisterEvent("QUEST_LOG_UPDATE")

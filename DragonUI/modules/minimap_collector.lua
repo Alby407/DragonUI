@@ -29,6 +29,7 @@ local mathmax, mathmin, mathfloor, mathceil =
 local mathrad, mathdeg, mathcos, mathsin, mathpi =
       math.rad, math.deg, math.cos, math.sin, math.pi
 local mathatan2, mathatan = math.atan2, math.atan
+local mathabs = math.abs
 local strlower, tsort = string.lower, table.sort
 
 -- ----------------------------------------------------------------------------
@@ -43,6 +44,8 @@ local HIGHLIGHT_TEX   = "Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight"
 local WHITE_TEX       = "Interface\\Buttons\\WHITE8X8"
 local BORDER_TEX      = "Interface\\AddOns\\DragonUI\\Textures\\Minimap\\border_buttons.tga"
 local GOLD_R, GOLD_G, GOLD_B = 1.0, 0.82, 0.20
+-- The Forever ring's band, lifted a little so a 1 px line still reads as that bronze.
+local BRONZE_R, BRONZE_G, BRONZE_B = 0.62, 0.45, 0.26
 
 local INCLUDE_BUTTONS = {
     "WIM_IconFrame",
@@ -87,7 +90,13 @@ local function NormalizeAngle(a)
     return a
 end
 
+local function IsForever()
+    return deps.IsForeverActive ~= nil and deps.IsForeverActive() and true or false
+end
+
+-- Forever style has no arrow collector; the saved choice comes back with the DragonUI style.
 local function GetStyle()
+    if IsForever() then return STYLE_DUI end
     local c = GetCfg()
     local s = (c and c.collector_style) or STYLE_DUI
     if s == STYLE_CLASSIC then return s end
@@ -151,9 +160,17 @@ local function SafeSet(tex, primary, fallback)
     end
 end
 
+-- The square DragonUI frame's chevron differs from the round ring's, so it gets its own cut.
+local function ClassicIconPath()
+    if deps.IsDragonUISquareFrame and deps.IsDragonUISquareFrame() then
+        return deps.DRAGONUI_SQUARE_COLLECTOR_ICON
+    end
+    return deps.DRAGONUI_CLASSIC_COLLECTOR_ICON
+end
+
 local function SetClassicIcon(tex)
     if not tex then return end
-    SafeSet(tex, deps.DRAGONUI_CLASSIC_COLLECTOR_ICON)
+    SafeSet(tex, ClassicIconPath())
     tex:SetTexCoord(0, 1, 0, 1)
 end
 
@@ -183,8 +200,9 @@ local function LayoutSettingsIcon(btn, pressed)
     icon:SetPoint("CENTER", btn, "CENTER", 0, 0)
     icon:SetTexCoord(0, 1, 0, 1)
     if btn.ringFrame then
+        local ringFrameSize = ringSize * (btn.DragonUI_RingGrowth or 1)
         btn.ringFrame:ClearAllPoints()
-        btn.ringFrame:SetSize(ringSize, ringSize)
+        btn.ringFrame:SetSize(ringFrameSize, ringFrameSize)
         btn.ringFrame:SetPoint("CENTER", btn, "CENTER", 0, 0)
     end
     if btn.circle then
@@ -197,9 +215,9 @@ local function SetClassicGlow(tex)
     if not tex then return end
     local a = deps.addon
     if a and a.SafeSetTexture then
-        a:SafeSetTexture(tex, deps.DRAGONUI_CLASSIC_COLLECTOR_ICON)
+        a:SafeSetTexture(tex, ClassicIconPath())
     else
-        tex:SetTexture(deps.DRAGONUI_CLASSIC_COLLECTOR_ICON or WHITE_TEX)
+        tex:SetTexture(ClassicIconPath() or WHITE_TEX)
     end
     tex:SetTexCoord(0, 1, 0, 1)
 end
@@ -266,7 +284,11 @@ local function EnsureCircleClickAnimation(btn)
 
     local parent = btn.ringFrame or btn
     local flash = parent:CreateTexture(nil, "OVERLAY", nil, 7)
-    flash:SetTexture(BORDER_TEX)
+    if deps.DressButtonRing then
+        deps.DressButtonRing(flash)
+    else
+        flash:SetTexture(BORDER_TEX)
+    end
     flash:SetBlendMode("ADD")
     flash:SetAllPoints(parent)
     flash:SetVertexColor(GOLD_R, GOLD_G, GOLD_B, 1)
@@ -385,9 +407,13 @@ end
 -- Geometry helpers
 -- ----------------------------------------------------------------------------
 local function GetOrbitRadius(btn)
+    local scale = (btn and btn.GetScale and btn:GetScale()) or 1
+    local foreverOrbit = deps.GetForeverOrbitRadius and deps.GetForeverOrbitRadius()
+    if foreverOrbit then
+        return foreverOrbit / scale
+    end
     local mapR = mathmax(Minimap:GetWidth(), Minimap:GetHeight()) * 0.5
     local size = (btn and btn:GetWidth()) or deps.DRAGONUI_SETTINGS_BUTTON_SIZE or 24
-    local scale = (btn and btn.GetScale and btn:GetScale()) or 1
     -- Sit on the minimap rim and hang outside (+8); ring is already btn+4.
     return mathmax(12, mapR - (size * scale) * 0.5 + 6)
 end
@@ -404,8 +430,24 @@ local function PositionByAngle(btn, angle)
     local n = NormalizeAngle(angle)
     local r = GetOrbitRadius(btn)
     local rad = mathrad(n)
+    local cosA = mathcos(rad)
+    local sinA = mathsin(rad)
+    local x, y
+    if GetMinimapShape and GetMinimapShape() == "SQUARE" then
+        local maxCoord = mathmax(mathabs(cosA), mathabs(sinA))
+        if maxCoord > 0 then
+            x = (cosA / maxCoord) * r
+            y = (sinA / maxCoord) * r
+        else
+            x = cosA * r
+            y = sinA * r
+        end
+    else
+        x = cosA * r
+        y = sinA * r
+    end
     btn:ClearAllPoints()
-    btn:SetPoint("CENTER", Minimap, "CENTER", mathcos(rad) * r, mathsin(rad) * r)
+    btn:SetPoint("CENTER", Minimap, "CENTER", x, y)
     btn.DragonUI_Angle = n
 end
 
@@ -535,7 +577,8 @@ local function RestoreOrigin(btn)
     if o.level  then btn:SetFrameLevel(o.level) end
     if o.w and o.h then btn:SetSize(o.w, o.h) end
     if o.alpha then btn:SetAlpha(o.alpha) end
-    if o.scale then btn:SetScale(o.scale) end
+    local launcherScale = o.parent == Minimap and deps.AdoptLauncher and deps.AdoptLauncher(btn)
+    if launcherScale or o.scale then btn:SetScale(launcherScale or o.scale) end
     btn:ClearAllPoints()
     if o.points then
         for _, p in ipairs(o.points) do btn:SetPoint(unpack(p)) end
@@ -661,6 +704,14 @@ local function ApplyCollectorStyle(c)
         c.classicTopBorder, c.classicBottomBorder, c.classicRightBorder = top, bot, right
     end
 
+    local r, g, b = 1, 0.82, 0
+    if IsForever() then
+        r, g, b = BRONZE_R, BRONZE_G, BRONZE_B
+    end
+    c.classicTopBorder:SetGradientAlpha("HORIZONTAL", r, g, b, 0, r, g, b, 1)
+    c.classicBottomBorder:SetGradientAlpha("HORIZONTAL", r, g, b, 0, r, g, b, 1)
+    c.classicRightBorder:SetVertexColor(r, g, b, 1)
+
     -- Original behavior: both styles show the same background/borders.
     c.classicBackground:Show()
     c.classicTopBorder:Show()
@@ -677,12 +728,17 @@ local function PositionCollector()
     c:SetScale(GetMinimapScale())
     c:ClearAllPoints()
 
+    local sbtn = GetSettingsBtn()
     if GetStyle() == STYLE_CLASSIC then
-        c:SetPoint("RIGHT", Minimap, "LEFT", -5, 0)
+        -- The square frame's arrow sits further out; its button's edge clears the tip as the ring's does.
+        if sbtn and deps.IsDragonUISquareFrame and deps.IsDragonUISquareFrame() then
+            c:SetPoint("RIGHT", sbtn, "LEFT", 0, 0)
+        else
+            c:SetPoint("RIGHT", Minimap, "LEFT", -5, 0)
+        end
         return
     end
 
-    local sbtn = GetSettingsBtn()
     if sbtn then c:SetPoint("TOPRIGHT", sbtn, "TOPLEFT", -5, 0) end
 end
 
@@ -786,7 +842,11 @@ local function NormalizeSkinned(btn)
     btn:SetScale(1)
     btn:SetSize(21, 21)
     if btn.circle then
-        btn.circle:SetSize(25, 25)
+        if deps.DressButtonRing then
+            deps.DressButtonRing(btn.circle, 25)
+        else
+            btn.circle:SetSize(25, 25)
+        end
         btn.circle:ClearAllPoints()
         btn.circle:SetPoint("CENTER", btn, "CENTER", 0, 0)
     end
@@ -932,6 +992,7 @@ local function PlaceCollectedButton(btn, c, index)
 
     local skin = IsSkinEnabled()
     local styleKey = (GetStyle() == STYLE_CLASSIC and "classic" or "dragonui") .. ":" .. (skin and "1" or "0")
+        .. (IsForever() and ":forever" or "")
     local sameLayout = btn.DragonUI_CollectorManaged
         and btn:GetParent() == c
         and btn.DragonUI_CollectorIndex == index
@@ -1087,15 +1148,30 @@ end
 -- ----------------------------------------------------------------------------
 -- Settings button scripts (named, no closures over local btn)
 -- ----------------------------------------------------------------------------
+local OnSettingsEnter
+
 local function OnSettingsClick(self, mouseBtn)
     if self.DragonUI_SuppressClickUntil and GetTime and GetTime() < self.DragonUI_SuppressClickUntil then
         return
     end
     if mouseBtn == "RightButton" then
         ToggleInterfaceConfig()
+    elseif IsShiftKeyDown() then
+        -- EditorMode:Show refuses combat silently; say why, like the settings click does.
+        if InCombatLockdown() then
+            addon:Error(addon.L["Cannot toggle editor mode during combat!"])
+        elseif addon.EditorMode then
+            addon.EditorMode:Toggle()
+        end
     else
         ToggleCollector()
         UpdateHighlightStyle(self)
+        -- The tooltip was placed for the old box; place it again next frame, once the box has its new rect.
+        if GameTooltip and GameTooltip:IsOwned(self) then
+            addon:After(0, function()
+                if GameTooltip:IsOwned(self) then OnSettingsEnter(self) end
+            end)
+        end
     end
 end
 
@@ -1111,7 +1187,7 @@ local function OnSettingsMouseUp(self)
     LayoutSettingsIcon(self, false)
 end
 
-local function OnSettingsEnter(self)
+function OnSettingsEnter(self)
     if IsSettingsButtonFadeEnabled() and deps.fadein then
         deps.fadein(self)
     else
@@ -1125,7 +1201,18 @@ local function OnSettingsEnter(self)
     if style == STYLE_CLASSIC then
         GameTooltip:SetOwner(self, "ANCHOR_NONE")
         GameTooltip:ClearAllPoints()
-        GameTooltip:SetPoint("RIGHT", self, "LEFT", 3, -85)
+        local c = GetCollector()
+        local boxBottom = c and c.isOpen and c:IsShown() and c:GetBottom()
+        local top, bottom = self:GetTop(), self:GetBottom()
+        if boxBottom and top and bottom then
+            -- Edges flush under the open box (centred on the minimap, height = rows), like the circle style's tooltip.
+            local middle = (top + bottom) / 2 * self:GetEffectiveScale()
+            local y = (boxBottom * c:GetEffectiveScale() - middle) / GameTooltip:GetEffectiveScale()
+            GameTooltip:SetPoint("TOPRIGHT", self, "LEFT", 3, y)
+        else
+            -- Closed: right beside the arrow it describes; opening the box moves it underneath.
+            GameTooltip:SetPoint("RIGHT", self, "LEFT", 3, 0)
+        end
     else
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     end
@@ -1133,6 +1220,7 @@ local function OnSettingsEnter(self)
     GameTooltip:AddLine((L and L["Left-click to show or hide minimap addon buttons."])
         or "Left-Click to open minimap buttons.", 1, 0.82, 0, true)
     GameTooltip:AddLine(L["Right-click to open DragonUI settings."], 1, 0.82, 0, true)
+    GameTooltip:AddLine(L["Shift-click to open Editor Mode."], 1, 0.82, 0, true)
     if style == STYLE_DUI then
         GameTooltip:AddLine(L["Drag to move"], 0.7, 0.7, 0.7, true)
     end
@@ -1240,10 +1328,18 @@ local function ApplyClassicStyle(btn)
     btn:SetScript("OnUpdate", nil)
     btn.DragonUI_Dragging = false
     btn.DragonUI_DragMoved = false
-    btn:SetSize(21, 21)
     btn:SetScale(1)
     btn:ClearAllPoints()
-    btn:SetPoint("RIGHT", Minimap, "LEFT", 16.5, -2)
+    local size, x
+    if deps.GetSquareArrowPlacement then size, x = deps.GetSquareArrowPlacement(btn) end
+    if size then
+        -- An exact copy of the square frame's left chevron, laid over it.
+        btn:SetSize(size, size)
+        btn:SetPoint("CENTER", Minimap, "CENTER", x, 0)
+    else
+        btn:SetSize(21, 21)
+        btn:SetPoint("RIGHT", Minimap, "LEFT", 16.5, -2)
+    end
 
     if btn.icon then
         btn.icon:ClearAllPoints()
@@ -1261,9 +1357,28 @@ local function ApplyClassicStyle(btn)
     end
 end
 
+-- The gold tint belongs to DragonUI's silver ring; Forever's ring brings its own bronze.
+local function DressSettingsRing(btn)
+    local ring = btn.circle
+    if not ring or not deps.DressButtonRing then return end
+    btn.DragonUI_RingGrowth = deps.DressButtonRing(ring)
+    if IsForever() then
+        ring:SetVertexColor(1, 1, 1)
+    else
+        ring:SetVertexColor(1, 0.82, 0.28)
+    end
+    if btn.DragonUI_ClickFlash then
+        deps.DressButtonRing(btn.DragonUI_ClickFlash)
+    end
+end
+
 local function ApplyDUIStyle(btn)
+    -- The arrow pulse's OnStop/OnFinished puts the arrow icon back, so kill it before the gear goes on.
+    local attention = btn.DragonUI_ArrowAttentionAnim
+    if attention and attention:IsPlaying() then attention:Stop() end
     btn:SetSize(deps.DRAGONUI_SETTINGS_BUTTON_SIZE, deps.DRAGONUI_SETTINGS_BUTTON_SIZE)
     btn:SetScale(1)
+    DressSettingsRing(btn)
     if btn.ringFrame then btn.ringFrame:Show() end
     if btn.icon then
         SetSettingsIcon(btn.icon)

@@ -1,3 +1,5 @@
+-- Copyright (c) 2026 NeticSoul. Licensed under the MIT License; see LICENSE.
+
 --[[
 ================================================================================
 DragonUI_Options - English Locale (Default)
@@ -20,6 +22,9 @@ if not L then return end
 -- ============================================================================
 
 L["DragonUI"] = true
+L["Core"] = true
+L["Frames"] = true
+L["Interface"] = true
 L["Use the tabs on the left to configure modules, action bars, unit frames, minimap, and more."] = true
 L["Editor Mode"] = true
 L["Cannot open options during combat."] = true
@@ -45,6 +50,16 @@ L["Created and maintained by NeticSoul, with community contributions."] = true
 L["Language"] = true
 L["Choose the language used by the DragonUI interface."] = true
 L["Follow the client language"] = true
+L["Number Abbreviations"] = true
+L["How unit frames, nameplates and the resource display shorten large numbers."] = true
+
+-- Loot Roll
+L["Auto Greed/DE"] = true
+L["Automatically select greed or disenchant (when available) on green quality items. This will only work if you are the max level."] = true
+
+-- Settings window
+L["Settings Window"] = true
+L["Size of this window on top of your UI scale; 1.0 matches the other panels. It never grows past the screen."] = true
 
 L["Commands: /dragonui, /dui, /pi \226\128\148 /dragonui edit (editor) \226\128\148 /dragonui help"] = true
 L["GitHub (select and Ctrl+C to copy):"] = true
@@ -109,7 +124,9 @@ L["Modern reskin of the Blizzard character window."] = true
 L["Enable Character Panel"] = true
 L["Apply the DragonUI reskin to the character window."] = true
 L["Class Portrait"] = true
-L["Show your class icon in the portrait instead of your character's face."] = true
+L["Portrait"] = true
+L["Class Icon"] = true
+L["Specialization Icon"] = true
 L["Class-Colored Level Text"] = true
 L["Color the class name in the \"Level X Race Class\" line."] = true
 -- Pets & Mounts
@@ -121,6 +138,12 @@ L["Enable Enhanced Tooltips"] = true
 L["KeyBind Mode"] = true
 L["Quest Tracker"] = true
 L["Version Check"] = true
+
+-- Farm mode
+L["Farm Mode"] = true
+L["Extra scale"] = true
+L["Bigger minimap with the surrounding clutter hidden."] = true
+L["Extra scale applied on top of the minimap scale."] = true
 
 -- Module toggle descriptions
 L["Enable DragonUI player castbar styling."] = true
@@ -145,12 +168,21 @@ L["Enable Aura Borders"] = true
 L["Show modern borders around buff and debuff icons."] = true
 L["Buff Border Color"] = true
 L["Border Style"] = true
+L["Detailed"] = true
 L["Rounded"] = true
 L["Square"] = true
+L["DragonUI Square"] = true
+L["Forever Square"] = true
+L["Square Border"] = true
+L["Forever Frame"] = true
+L["Thin Line"] = true
+L["Top Arrow"] = true
+L["Rounded Corners"] = true
 L["When enabled, a 'Weapon Enchants' mover appears in Editor Mode that you can drag to any position on screen."] = true
 L["Positions"] = true
 L["Player Buffs & Debuffs"] = true
 L["Layout settings for the player buff and debuff bar. These do not affect target or focus auras."] = true
+L["Show your debuffs on the player aura bar."] = true
 L["Buff Order"] = true
 L["Default (Blizzard)"] = true
 L["How to sort player buff icons on the buff bar."] = true
@@ -293,6 +325,9 @@ L["Fire abilities on key press instead of key release."] = true
 L["Enable Item Quality Borders"] = true
 L["Show quality-colored borders on items in bags, character panel, bank, merchant, and inspect frames."] = true
 L["Adds quality-colored glow borders to items in your bags, character panel, bank, merchant, and inspect frames: green = uncommon, blue = rare, purple = epic, orange = legendary."] = true
+L["Character Item Counts"] = true
+L["Show Character Item Counts"] = true
+L["Shows how many of the hovered item each of your characters on this realm holds, split into bags, bank and equipped."] = true
 L["Minimum Quality"] = true
 L["Poor"] = true
 L["Common"] = true
@@ -304,6 +339,8 @@ L["Legendary"] = true
 -- Loot Window
 L["Loot Window"] = true
 L["Configure the DragonUI loot window."] = true
+L["Auto-Hide Empty Loot"] = true
+L["Close the loot window when there is nothing left to loot."] = true
 L["Enable Loot Window"] = true
 L["Apply the DragonUI skin to the Blizzard loot window."] = true
 L["Open at Cursor"] = true
@@ -327,6 +364,8 @@ L["Thick"] = true
 L["Vertical position of the item level number on the icon."] = true
 L["Average Item Level"] = true
 L["Show the average item level of equipped gear on the character and inspect panels."] = true
+L["Durability on Character Slots"] = true
+L["Show each equipped item's durability percentage on its character panel slot, opposite the item level."] = true
 L["Show in Tooltip"] = true
 L["Also enable Blizzard's own item level line in item tooltips."] = true
 L["Choose where the number appears:"] = true
@@ -334,6 +373,14 @@ L["Guild Bank"] = true
 L["Inspect"] = true
 L["Merchant"] = true
 L["Retail-style vendor window chrome"] = true
+L["Merchant Auto Services"] = true
+L["Automatically repair items and sell junk when you open a merchant window. Requires the Merchant module."] = true
+L["Auto Repair"] = true
+L["Automatically repair all your items when a merchant window opens."] = true
+L["Use Guild Funds"] = true
+L["Pay for automatic repairs with guild bank money when you have the right and the guild can cover the cost."] = true
+L["Auto Sell Junk"] = true
+L["Automatically sell grey (junk) items when a merchant window opens."] = true
 L["Quest Dialog"] = true
 L["Retail-style quest and gossip window chrome"] = true
 L["Trade"] = true
@@ -354,17 +401,23 @@ L["Styled Health Bar"] = true
 L["Restyle the tooltip health bar with class/reaction colors and slimmer look."] = true
 L["Anchor to Cursor"] = true
 L["Make the tooltip follow the cursor position instead of the default anchor."] = true
+L["Cursor Anchor Offset X"] = true
+L["Horizontal offset from the cursor."] = true
+L["Cursor Anchor Offset Y"] = true
+L["Vertical offset from the cursor."] = true
 L["Show Aura Source"] = true
 L["Show the caster's name (class-colored) on buff and debuff tooltips."] = true
 L["Aura Tooltips"] = true
-L["Show Aura Spell ID"] = true
-L["Show the spell ID on buff and debuff tooltips. Requires the Tooltip module."] = true
+L["Show Spell IDs"] = true
+L["Show spell IDs on aura, spell and chat-link tooltips. Requires the Tooltip module."] = true
 
 -- Chat Mods
 L["Enable Chat Mods"] = true
 L["Enables or disables Chat Mods."] = true
 L["Show Link Tooltips on Hover"] = true
 L["Show tooltips for supported chat links without holding Alt."] = true
+L["Class Colored Names"] = true
+L["Color player names by class in every chat type and channel. Turning it off removes the class colors from this character's chat settings."] = true
 L["Editbox Position"] = true
 L["Choose where the chat editbox is positioned."] = true
 L["Top"] = true
@@ -484,6 +537,8 @@ L["Quest Item Glow"] = true
 L["Highlight quest items with a golden border."] = true
 L["Glow Intensity"] = true
 L["Opacity of the quality ring on item slots."] = true
+L["Item Count in Tooltip"] = true
+L["Show how many of the hovered item you own in total, across your bags and bank."] = true
 L["Quality Filter Row"] = true
 L["Show the rarity filter dots at the bottom of the bag frame."] = true
 
@@ -539,6 +594,10 @@ L["Main Bar Only Background"] = true
 L["Only the main action bar buttons will have a background."] = true
 L["Hide Main Bar Background"] = true
 L["Hide the background texture of the main action bar."] = true
+L["Button Tooltips"] = true
+L["When to show tooltips on action, pet and stance buttons."] = true
+L["Always"] = true
+L["Never"] = true
 
 -- Text visibility
 L["Text Visibility"] = true
@@ -553,6 +612,8 @@ L["Show Page Numbers"] = true
 L["Cooldown Text"] = true
 L["Min Duration"] = true
 L["Minimum duration for cooldown text to appear."] = true
+L["Whole Seconds"] = true
+L["Show cooldown text in whole seconds, without the tenths under 5 seconds."] = true
 L["Cooldown Text Color"] = true
 L["Size of cooldown text."] = true
 
@@ -708,6 +769,8 @@ L["Show Icon"] = true
 L["Icon Size"] = true
 L["Modern Icon Border"] = true
 L["Modern Icon Border Desc"] = "Frame the spell icon with the DragonUI action-bar border instead of the classic ring."
+L["Spell Icon Left of Bar"] = true
+L["Modern style: show the spell icon to the left of the cast bar instead of under it."] = true
 L["Modern Icon Border Debuff Desc"] = "Frame aura icons with the DragonUI action-bar border."
 L["Text Mode"] = true
 L["Simple (Name Only)"] = true
@@ -720,6 +783,10 @@ L["Hold Time (Success)"] = true
 L["How long the bar stays after a successful cast."] = true
 L["Hold Time (Interrupt)"] = true
 L["How long the bar stays after being interrupted."] = true
+L["Shake on Interrupt"] = true
+L["Shake the cast bar briefly when it gets interrupted."] = true
+L["Show Interrupter"] = true
+L["Show the name of whoever interrupted the cast."] = true
 L["Reset Position"] = true
 L["Player castbar position reset."] = true
 L["Castbar detached - positioned freely via Editor Mode"] = true
@@ -787,6 +854,8 @@ L["Addon icons fade out when not hovered."] = true
 L["Player Arrow Size"] = true
 L["New Blip Style"] = true
 L["Use newer-style minimap blip icons."] = true
+L["Show Ping Sender"] = true
+L["Show who pinged the minimap, in their class color."] = true
 L["Minimap Decorations"] = true
 L["Border presets from SexyMap by funkydude, used with permission."] = true
 L["Adds decorative animated texture layers around the DragonUI minimap."] = true
@@ -843,6 +912,10 @@ L["Party"] = true
 L["Class Color Health"] = true
 L["Class icon instead of 3D model for players."] = true
 L["Alternative Class Icons"] = true
+L["No Portrait"] = true
+L["Hides the portrait: the frame closes where it was and the bars keep their place."] = true
+L["No Portrait (All Frames)"] = true
+L["Player, target, focus, ToT and ToF at once."] = true
 L["Use DragonUI alternative class icons instead of Blizzard's class icon atlas."] = true
 L["Format Large Numbers"] = true
 L["Text Format"] = true
@@ -862,9 +935,25 @@ L["Always Show Mana Text"] = true
 -- Player frame specific
 L["Player Frame"] = true
 L["Dragon Decoration"] = true
+L["Show PvP Icon"] = true
+L["PvP Icon Style"] = true
+L["Forever"] = true
+L["Unit Frame Art"] = true
+L["Art of the player, target, focus, ToT, ToF, pet and party frames."] = true
+L["Level Style"] = true
+L["Auto follows the unit frame art. Forever shows the level in a circle and moves the name to the left."] = true
+L["Center Names"] = true
+L["Center the player, target and focus names instead of aligning them to the left."] = true
+L["Auto follows the unit frame art: the Forever badge with the Forever art, the classic icon with the DragonUI art."] = true
+L["Elite Dragons"] = true
+L["Elite Dragons (Target)"] = true
+L["Auto follows the unit frame art. Dragons around elite and rare portraits; the player picks its own in Dragon Decoration."] = true
 L["None"] = true
-L["Elite (Golden)"] = true
-L["RareElite (Winged)"] = true
+L["Elite (Retail)"] = true
+L["RareElite (Retail)"] = true
+L["Elite (Forever)"] = true
+L["RareElite (Forever)"] = true
+L["World Boss (Forever)"] = true
 L["Glow Effects"] = true
 L["Show Rest Glow"] = true
 L["Golden glow around the player frame when resting (inn or city). Works with all frame modes."] = true
@@ -910,6 +999,10 @@ L["Target Frame"] = true
 L["Threat Glow"] = true
 L["Show Name Background"] = true
 L["Show the colored name background behind the target name."] = true
+L["Show Buffs"] = true
+L["Show the buffs under the target frame."] = true
+L["Show Debuffs"] = true
+L["Show the debuffs under the target frame."] = true
 
 -- Focus frame
 L["Focus Frame"] = true
@@ -1127,6 +1220,7 @@ L["Only Mine"] = true
 L["Each listed spell can decide whose casts it shows, whatever 'Only My Debuffs' says."] = true
 L["Click an entry to select it."] = true
 L["Click to select."] = true
+L["Click to select"] = true
 L["Remove Spell"] = true
 L["Select a spell above to choose whose casts it shows."] = true
 L["Name & Health"] = true
@@ -1152,6 +1246,11 @@ L["Party Class Colors"] = true
 L["Use class colors for party member nameplates instead of the friendly player color."] = true
 L["Friendly Class Colors"] = true
 L["Class-color every friendly player, not just your group. Party and raid show automatically; others fill in when you target or mouse over them, or instantly with awesome_wotlk."] = true
+L["Remember Players and NPCs"] = true
+L["Remember the class, guild and title of players you have seen and the titles of NPCs you have hovered, so they show at once next time. Used only by the class color, guild and title options. When off, everything learned is forgotten at logout."] = true
+L["Forget Learned Players and NPCs"] = true
+L["Delete the players learned on this realm and every learned NPC title."] = true
+L["Forget every player and NPC title that nameplates have learned?"] = true
 L["Headline Mode"] = true
 L["Enable Headline Mode"] = true
 L["Hide health, power and cast bars on friendly nameplates, showing only the name."] = true
@@ -1304,6 +1403,7 @@ L["Off-Target Players Only"] = "Players only"
 L["Off-Target Players Only Desc"] = "Aggressive mode for players only. World mobs stay on safe mode."
 L["Off-Target Aggressive Warning"] = "|cffffffffWarning:|r\n- If a cast is cancelled by moving or jumping (fake cast), the bar still runs to the end.\n- Same-name mobs may show the bar on the wrong nameplate."
 L["Off-Target Players Only Warning"] = "|cffffffffWarning:|r\n- If a cast is cancelled by moving or jumping (fake cast), the bar still runs to the end."
+L["Off-Target Aggressive Ignored"] = "Not used with awesome_wotlk or with a client that shows cast bars on every nameplate. Those already know who is casting, so safe mode is used instead."
 L["Icons"] = true
 L["Quest"] = true
 L["Show Raid Markers"] = true
@@ -1472,6 +1572,8 @@ L["The attribute your class is built around."] = true
 L["Auto (by class)"] = true
 L["Combat Statistics"] = true
 L["Which one leads the list: Melee, Ranged, or Spell."] = true
+L["Equipment Sets"] = true
+L["Equip a set automatically when you switch talent specialization. Saved per character."] = true
 L["Opens the window without the micro menu."] = true
 L["Toggle Pets & Mounts"] = true
 L["Click, then press the key to bind. Press Escape to clear it."] = true
@@ -1495,6 +1597,10 @@ L["Show Zone Levels"] = true
 L["Show the recommended level range next to zone names and instance pins."] = true
 L["Fade Map While Moving"] = true
 L["Dim the map while you move, unless the cursor is over it."] = true
+L["Group Member Pins"] = true
+L["How party and raid members show on the world map and the battlefield map. Class colors and class icons also color their names in the tooltip and add their health."] = true
+L["Class Colors"] = true
+L["Class Icons"] = true
 L["Moving Map Alpha"] = true
 L["How visible the map stays while you move."] = true
 L["Show towns, flight points and other landmark pins on the map."] = true
@@ -1529,6 +1635,30 @@ L["HP Warning Threshold"] = true
 L["Percentage of HP at which the warning triggers."] = true
 L["Test Warning (3 sec)"] = true
 L["Triggers a 3-second preview of the warning state to help you adjust the threshold."] = true
+L["Personal Resource Display"] = true
+L["Add Health and Resource below your Character."] = true
+L["Swing Timer"] = true
+L["Show a bar with the time left until each weapon's next swing."] = true
+L["Level Up Enhance"] = true
+L["Animated level-up banner that lists what each new level unlocks: abilities, features, dungeons, raids and battlegrounds."] = true
+L["Enable Level-Up Banner"] = true
+L["Size of the banner and its list."] = true
+L["Show Unlocks"] = true
+L["Show what the new level unlocks, such as new abilities, features and dungeons."] = true
+L["Unlock Style"] = true
+L["One at a Time"] = true
+L["List"] = true
+L["One at a time shows each unlock inside the banner in turn, as retail does. List shows them all together under the banner."] = true
+L["Open the List Automatically"] = true
+L["Open the list as soon as the banner appears. Otherwise, click the dot under the banner."] = true
+L["Unlocks in Chat"] = true
+L["Print the unlocks after the level-up message in chat."] = true
+L["Pet Level-Up Banner"] = true
+L["Show a banner when your hunter pet reaches a new level."] = true
+L["Test Banner"] = true
+L["Show the banner for your next level (or /lvltest <level>)."] = true
+L["Show Bar Title"] = true
+L["Show Time"] = true
 
 -- Talents
 L["Talents"] = true
@@ -1556,3 +1686,34 @@ L["Lower rank selector"] = true
 L["How a spell card offers its lower ranks: a menu under the icon or a side flyout."] = true
 L["Menu under the icon"] = true
 L["Side flyout"] = true
+
+-- ============================================================================
+-- PROFESSIONS
+-- ============================================================================
+L["Professions"] = true
+L["Forever-style professions window with side tabs and an overview page."] = true
+L["Enable Professions"] = true
+L["Use the Forever professions window instead of the stock one."] = true
+L["Professions Window Scale"] = true
+L["Scales the whole professions window; the room it takes beside other panels follows its size."] = true
+L["Side Tabs Scale"] = true
+L["Scales only the profession tabs beside the window, on top of the window scale."] = true
+L["Professions Micro Button"] = true
+L["Show the Professions button in the micro menu. It opens the professions overview."] = true
+L["Combo Points"] = true
+L["Combo points as orbs under the player frame and/or on the target frame."] = true
+L["Location"] = true
+L["Auto follows the unit frame art: under the player with the DragonUI art, on the target with the Forever art."] = true
+L["Player + Target"] = true
+L["Orb Style"] = true
+L["Auto follows the unit frame art. Forever uses its bronze orbs for rogues and druids alike."] = true
+L["Hide When Empty"] = true
+L["Hide the orbs at 0 points instead of showing them empty."] = true
+
+-- Auto-Accept
+L["Auto-Accept"] = true
+L["Party invites from the players you pick below are accepted for you; anyone else is left for you to answer."] = true
+L["Accept Invites from Friends"] = true
+L["Automatically accept party invites from players on your friends list."] = true
+L["Accept Invites from Guild Members"] = true
+L["Automatically accept party invites from members of your guild."] = true

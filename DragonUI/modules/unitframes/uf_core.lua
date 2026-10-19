@@ -79,7 +79,6 @@ UF.TEXTURES = {
     pet = {
         SMALL_FRAME_PATH = "Interface\\Addons\\DragonUI\\Textures\\UnitFrames\\Small\\",
         UNITFRAME_PATH   = "Interface\\Addons\\DragonUI\\Textures\\UnitFrames\\Bars\\",
-        ATLAS_TEXTURE    = "Interface\\Addons\\DragonUI\\Textures\\UnitFrames\\uiunitframe",
         TOT_BASE         = "UI-HUD-UnitFrame-TargetofTarget-PortraitOn-",
         -- Pre-computed power textures (same as smallStyle BAR_PREFIX + power name)
         POWER_TEXTURES = {
@@ -89,35 +88,12 @@ UF.TEXTURES = {
             ENERGY      = "Interface\\Addons\\DragonUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-Energy",
             RUNIC_POWER = "Interface\\Addons\\DragonUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-RunicPower",
         },
-        COMBAT_TEX_COORDS = {0.3095703125, 0.4208984375, 0.3125, 0.404296875},
     },
 
     -- Shared class icon texture (used by class portrait system)
     CLASS_ICON_ALTERNATIVE_PREFIX = "Interface\\AddOns\\DragonUI\\Textures\\ClassIcons\\",
     CLASS_ICON_ALTERNATIVE_SUFFIX = ".blp",
     CLASS_ICON = "Interface\\TargetingFrame\\UI-Classes-Circles",
-}
-
-
--- ============================================================================
--- CLASSIFICATION COORDINATES
--- ============================================================================
--- Tex coords + pixel dimensions for boss/elite/rare portrait decorations.
--- targetStyle uses larger icons; smallStyle uses smaller ones for ToT/FoT.
-
-UF.BOSS_COORDS = {
-    -- For target-style frames (TargetFrame, FocusFrame) — larger decorations
-    targetStyle = {
-        elite     = {0.001953125, 0.314453125, 0.322265625, 0.630859375, 80, 79, 4, 1},
-        rare      = {0.00390625, 0.31640625, 0.64453125, 0.953125, 80, 79, 4, 1},
-        rareelite = {0.001953125, 0.388671875, 0.001953125, 0.31835937, 99, 81, 13, 1},
-    },
-    -- For small-style frames (ToT, FoT) — smaller decorations
-    smallStyle = {
-        elite     = {0.001953125, 0.314453125, 0.322265625, 0.630859375, 60, 59, 3, 1},
-        rare      = {0.00390625, 0.31640625, 0.64453125, 0.953125, 60, 59, 3, 1},
-        rareelite = {0.001953125, 0.388671875, 0.001953125, 0.31835937, 74, 61, 10, 1},
-    },
 }
 
 
@@ -211,6 +187,89 @@ end
 function UF.IsEnabled(unitKey)
     local config = UF.GetConfig(unitKey)
     return config.enabled ~= false
+end
+
+-- ============================================================================
+-- PVP BADGE (WoW Forever style)
+-- ============================================================================
+
+local PVP_BADGE_SHEET = "Interface\\AddOns\\DragonUI\\Textures\\UnitFrames\\pvpforever"
+-- Forever draws its 1x atlases at 0.8; our portraits are ~0.93 the size of its 60/58 px ones.
+local PVP_BADGE_SCALE = 0.8 * 0.93
+-- { left, right, top, bottom, width, height, axis }: Forever's @2x cells at 1x sizes; axis = emblem off-centre.
+local PVP_BADGE_PARTS = {
+    circle   = { 0 / 256, 78 / 256, 0, 78 / 128, 39, 39 },
+    Alliance = { 80 / 256, 128 / 256, 0, 54 / 128, 24, 27 },
+    Horde    = { 130 / 256, 178 / 256, 0, 54 / 128, 24, 27 },
+    FFA      = { 180 / 256, 236 / 256, 0, 88 / 128, 28, 44, -1.5 },
+}
+
+-- Retail's PvP art at 2x in the layouts of Blizzard's UI-PVP-<kind> (64x64) and UI-Group-PVP-<faction> (32x32).
+local PVP_HD = "Interface\\AddOns\\DragonUI\\Textures\\UnitFrames\\PvP\\"
+local CLASSIC_PVP_HD = { Alliance = PVP_HD .. "Alliance", Horde = PVP_HD .. "Horde", FFA = PVP_HD .. "FFA" }
+-- Party frames draw factions from GroupFrame's own sheet, but FFA from the TargetingFrame one.
+local GROUP_PVP_HD = { Alliance = PVP_HD .. "Group-Alliance", Horde = PVP_HD .. "Group-Horde" }
+
+-- Call right after Blizzard sets the icon's texture; group = a party frame's icon.
+function UF.ApplyClassicPvPTexture(icon, kind, group)
+    local file = kind and ((group and GROUP_PVP_HD[kind]) or CLASSIC_PVP_HD[kind])
+    if file then
+        icon:SetTexture(file)
+    end
+end
+
+-- Same test as Blizzard's PvP icon code: free-for-all first, then a PvP-flagged faction.
+function UF.GetPvPKind(unit)
+    if UnitIsPVPFreeForAll(unit) then
+        return "FFA"
+    end
+    local factionGroup = UnitFactionGroup(unit)
+    if factionGroup and UnitIsPVP(unit) then
+        return factionGroup
+    end
+end
+
+-- Forever's dark circle with the emblem on top; callers anchor it by its TOP edge like Forever does.
+function UF.CreatePvPBadge(parent, circleName)
+    local circle = PVP_BADGE_PARTS.circle
+    local badge = CreateFrame("Frame", nil, parent)
+    badge:SetSize(circle[5] * PVP_BADGE_SCALE, circle[6] * PVP_BADGE_SCALE)
+
+    local background = badge:CreateTexture(circleName, "ARTWORK")
+    background:SetTexture(PVP_BADGE_SHEET)
+    background:SetTexCoord(circle[1], circle[2], circle[3], circle[4])
+    background:SetAllPoints(badge)
+
+    -- OVERLAY over ARTWORK: 3.3.5a ignores sublevels, so the emblem needs a higher layer than the circle.
+    local icon = badge:CreateTexture(nil, "OVERLAY")
+    icon:SetTexture(PVP_BADGE_SHEET)
+    icon:SetPoint("CENTER")
+    badge.icon = icon
+
+    badge:Hide()
+    -- Dark mode finds the circle by name, and its sweep may already have run.
+    if addon.RefreshDarkModeUnitFrames then
+        addon.RefreshDarkModeUnitFrames()
+    end
+    return badge
+end
+
+-- False when there is no art for the kind (caller keeps Blizzard's icon); mirrored leans the emblem outward.
+function UF.ShowPvPBadge(badge, kind, scale, mirrored)
+    local part = PVP_BADGE_PARTS[kind]
+    if not part then
+        badge:Hide()
+        return false
+    end
+    scale = scale or PVP_BADGE_SCALE
+    local circle = PVP_BADGE_PARTS.circle
+    badge:SetSize(circle[5] * scale, circle[6] * scale)
+    badge.icon:SetTexCoord(part[1], part[2], part[3], part[4])
+    badge.icon:SetSize(part[5] * scale, part[6] * scale)
+    badge.icon:ClearAllPoints()
+    badge.icon:SetPoint("CENTER", badge, "CENTER", mirrored and -2 * (part[7] or 0) * scale or 0, 0)
+    badge:Show()
+    return true
 end
 
 

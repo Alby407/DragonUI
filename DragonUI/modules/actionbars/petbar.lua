@@ -89,6 +89,10 @@ local function GetPetbarDualBarOffset()
     return 0
 end
 
+local function ResolvePetbarY(posY)
+    return addon.ResolveWidgetDefaultY and addon.ResolveWidgetDefaultY("petbar", posY) or posY
+end
+
 -- ============================================================================
 -- PETBAR IMPLEMENTATION (combat-safe)
 -- ============================================================================
@@ -120,7 +124,7 @@ local function CreateAnchorFrame()
     if widgetConfig then
         local anchorPoint = widgetConfig.anchor or "BOTTOM"
         local posX = widgetConfig.posX or config.x_position or -400
-        local posY = widgetConfig.posY or config.y_position or 200
+        local posY = ResolvePetbarY(widgetConfig.posY or config.y_position or 200)
         anchor:ClearAllPoints()
         anchor:SetPoint(anchorPoint, UIParent, anchorPoint, posX, posY + extraY)
     else
@@ -131,26 +135,103 @@ local function CreateAnchorFrame()
     return anchor
 end
 
+local ROW_STACK_GAP = 5
+
+-- The stance or totem bar holding this bar's row at its default spot: left edge, bottom, height.
+local function GetSharedRow()
+    local left, bottom, height
+    if addon.GetDefaultStanceRow then
+        left, bottom, height = addon.GetDefaultStanceRow()
+    end
+    if not left and addon.GetDefaultTotemRow then
+        left, bottom, height = addon.GetDefaultTotemRow()
+    end
+    return left, bottom, height
+end
+
+local function GetBottomRowDrop()
+    return addon.GetBottomRowDrop and addon.GetBottomRowDrop() or 0
+end
+
+-- Offset from the default spot: the row above a stance/totem bar, left-aligned with it (stacked = true),
+-- or just the drop when the bars underneath are off. nil if this bar was moved.
+local function GetRowOffset(anchor, posX, posY)
+    if not addon.IsWidgetAtDefaultPosition or not addon.IsWidgetAtDefaultPosition("petbar") then return end
+    local scale = anchor:GetScale()
+    local left, bottom, height = GetSharedRow()
+    if left then
+        local x = left / scale + anchor:GetWidth() / 2
+        local y = (bottom + height + ROW_STACK_GAP) / scale
+        return x - posX, y - posY, true
+    end
+    local drop = GetBottomRowDrop()
+    if drop > 0 then
+        return 0, -drop / scale, false
+    end
+end
+
+-- How far the cast bar and loot rolls must rise to clear a stacked pet bar that is on screen.
+local function GetStackLift()
+    local anchor, petbar = PetbarModule.anchor, PetbarModule.petbar
+    if not (IsModuleEnabled() and PetbarModule.stacked and anchor and petbar and petbar:IsShown()) then
+        return 0
+    end
+    -- A row that already dropped (bars underneath turned off) leaves room of its own.
+    return math.max(0, anchor:GetHeight() * anchor:GetScale() + ROW_STACK_GAP - GetBottomRowDrop())
+end
+addon.GetPetbarStackLift = GetStackLift
+
+local appliedStackLift = 0
+local function RefreshStackLift()
+    local lift = GetStackLift()
+    if lift == appliedStackLift then return end
+    appliedStackLift = lift
+    if addon.ApplyPlayerCastbarPosition then
+        addon.ApplyPlayerCastbarPosition()
+    end
+    if addon.RefreshLootRoll then
+        addon.RefreshLootRoll()
+    end
+end
+
 -- Dynamic anchor update method (respects widget system positions)
 local function UpdateAnchorPosition()
     if not IsModuleEnabled() then return end
     if not PetbarModule.anchor then return end
-    -- Skip repositioning while editor mode is active (user may be dragging the anchor)
-    if addon.EditorMode and addon.EditorMode:IsActive() and not addon._positionPresetApply then return end
+    -- In the editor only a bar still at its automatic spot follows the bars below; one being moved is left alone.
+    if addon.EditorMode and addon.EditorMode:IsActive() and not addon._positionPresetApply then
+        local anchor = PetbarModule.anchor
+        local moving = (IsMouseButtonDown("LeftButton") and GetMouseFocus() == anchor)
+            or anchor.DragonUI_WasDragged or anchor.DragonUI_WasAdjustedByEditor
+        if moving or not (addon.IsWidgetAtDefaultPosition and addon.IsWidgetAtDefaultPosition("petbar")) then
+            return
+        end
+    end
     
     -- Check if we have a saved widget position first
     local widgetConfig = addon.db and addon.db.profile and addon.db.profile.widgets and addon.db.profile.widgets.petbar
     if widgetConfig and (widgetConfig.anchor or widgetConfig.posX or widgetConfig.posY) then
+        -- The secure bar is anchored here, so this frame only moves out of combat.
+        if InCombatLockdown() then
+            if addon.CombatQueue then
+                addon.CombatQueue:Add("petbar_anchor_position", UpdateAnchorPosition)
+            end
+            return
+        end
+
         -- Use widget system position - don't override user's saved position
+        local anchor = PetbarModule.anchor
         local anchorPoint = widgetConfig.anchor or "BOTTOM"
         local posX = widgetConfig.posX or 0
-        local posY = widgetConfig.posY or 200
-        local extraY = GetPetbarDualBarOffset()
-        
-        if not InCombatLockdown() then
-            PetbarModule.anchor:ClearAllPoints()
-            PetbarModule.anchor:SetPoint(anchorPoint, UIParent, anchorPoint, posX, posY + extraY)
-        end
+        local posY = ResolvePetbarY(widgetConfig.posY or 200) + GetPetbarDualBarOffset()
+        local dx, dy, stacked = GetRowOffset(anchor, posX, posY)
+        PetbarModule.stacked = stacked == true
+        -- SaveUIFramePosition subtracts this, so leaving the editor never stores the automatic spot as a move.
+        anchor.DragonUI_LayoutOffset = dx and { dx, dy } or nil
+
+        anchor:ClearAllPoints()
+        anchor:SetPoint(anchorPoint, UIParent, anchorPoint, posX + (dx or 0), posY + (dy or 0))
+        RefreshStackLift()
         return
     end
     
@@ -196,6 +277,12 @@ local function CreatePetbarFrame()
     petbar:SetAllPoints(anchor)
     petbar:SetScale(config.scale or 1.0)
     PetbarModule.petbar = petbar
+    -- The state driver shows this bar in combat too (Treants, Shadowfiend); the cast bar may still move then.
+    if not petbar.DragonUI_StackLiftHooked then
+        petbar:HookScript('OnShow', RefreshStackLift)
+        petbar:HookScript('OnHide', RefreshStackLift)
+        petbar.DragonUI_StackLiftHooked = true
+    end
 
     return petbar
 end
@@ -398,7 +485,8 @@ local function CreateEventFrame()
         'PLAYER_LOGIN',
         'UNIT_AURA',
         'UNIT_FLAGS',
-        'UNIT_PET'
+        'UNIT_PET',
+        'UPDATE_MULTI_CAST_ACTIONBAR', -- learning Call of the Elements gives the totem row the pet bar stacks over
     }
     
     for _, event in ipairs(events) do
@@ -532,6 +620,8 @@ local function RestorePetbarSystem()
     PetbarModule.anchor = nil
     PetbarModule.petbar = nil
     PetbarModule.applied = false
+    PetbarModule.stacked = false
+    RefreshStackLift()
     
   
 end
@@ -681,6 +771,7 @@ initFrame:SetScript("OnEvent", function(self, event, addonName)
                 name = "petbar",
                 frame = nil, -- Frame will be set when created
                 configPath = {"widgets", "petbar"},
+                applyPosition = UpdateAnchorPosition,
                 showTest = ShowPetbarTest,
                 hideTest = HidePetbarTest
             })

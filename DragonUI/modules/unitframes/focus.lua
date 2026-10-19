@@ -119,6 +119,7 @@ local api = UF.TargetStyle.Create({
     },
 
     -- Feature flags
+    hasTapDenied     = true,  -- Grey name bg for tapped-by-other focus
     nameFrameAlpha   = 0.9,   -- SetAlpha on name background
     nameVertexAlpha  = 0.8,   -- 4th param of SetVertexColor
     nameFontSize     = 10,    -- Fixed font size for name text
@@ -129,10 +130,8 @@ local api = UF.TargetStyle.Create({
         return {
             _G.FocusFrameTextureFrameTexture,
             _G.FocusFrameBackground,
-            _G.FocusFrameFlash,
             _G.FocusFrameNumericalThreat,
             FocusFrame.threatNumericIndicator,
-            FocusFrame.threatIndicator,
             -- FoT children (visible as part of FocusFrame even if FoT module is disabled)
             _G.FocusFrameToTBackground,
             _G.FocusFrameToTTextureFrameTexture,

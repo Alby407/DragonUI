@@ -44,13 +44,21 @@ end
 -- POSITION HELPERS
 -- =============================================================================
 
+local function IsAtDefaultPosition(x, y, point)
+    local defaults = addon.defaults and addon.defaults.profile.lootroll or DEFAULTS
+    return point == defaults.anchor and math.abs(x - defaults.x) <= 1 and math.abs(y - defaults.y) <= 1
+end
+
 --- Move the invisible anchor frame to the saved (or default) position.
 local function UpdateAnchorPosition()
     local anchor = LootRollModule.anchorFrame
     if not anchor then return end
     local x, y, point = GetLootRollConfig()
+    local lift = IsAtDefaultPosition(x, y, point) and addon.GetPetbarStackLift and addon.GetPetbarStackLift() or 0
+    -- Position presets read this frame back; they subtract the lift so it is never saved as a move.
+    anchor.DragonUI_LayoutOffset = lift > 0 and { 0, lift } or nil
     anchor:ClearAllPoints()
-    anchor:SetPoint(point, UIParent, point, x, y)
+    anchor:SetPoint(point, UIParent, point, x, y + lift)
 end
 
 --- Attach GroupLootContainer to the bottom of our anchor frame.
@@ -145,6 +153,29 @@ local function InstallHooks()
     hookInstalled = true
 end
 
+-- Stores where the user left the anchor (drag or editor panel), re-anchored to its screen quadrant.
+local function SaveAnchorPosition(f)
+    local point, x, y = addon.GetQuadrantAnchor(f)
+    if point then
+        f:ClearAllPoints()
+        f:SetPoint(point, UIParent, point, x, y)
+        f:SetUserPlaced(false)
+
+        -- Save to DB
+        if addon.db and addon.db.profile then
+            if not addon.db.profile.lootroll then
+                addon.db.profile.lootroll = {}
+            end
+            addon.db.profile.lootroll.anchor = point
+            addon.db.profile.lootroll.x = x
+            addon.db.profile.lootroll.y = y
+        end
+
+        -- Re-attach container to new position
+        AttachContainer()
+    end
+end
+
 -- =============================================================================
 -- INITIALIZATION
 -- =============================================================================
@@ -188,6 +219,9 @@ function LootRollModule:Initialize()
             name = "lootroll",
             frame = anchor,
             configPath = nil, -- Custom save logic in OnDragStop
+            onNudge = function()
+                SaveAnchorPosition(anchor)
+            end,
             showTest = function()
                 LootRollModule:ShowEditorTest()
             end,
@@ -197,6 +231,17 @@ function LootRollModule:Initialize()
             onHide = function()
                 UpdateAnchorPosition()
                 AttachContainer()
+            end,
+            resetPosition = function()
+                local cfg = addon.db and addon.db.profile and addon.db.profile.lootroll
+                local defaults = addon.defaults and addon.defaults.profile.lootroll
+                if not (cfg and defaults) then return end
+                cfg.anchor, cfg.x, cfg.y = defaults.anchor, defaults.x, defaults.y
+                UpdateAnchorPosition()
+                AttachContainer()
+            end,
+            isDefaultPosition = function()
+                return IsAtDefaultPosition(GetLootRollConfig())
             end,
             module = LootRollModule
         })
@@ -271,6 +316,7 @@ function LootRollModule:ShowEditorTest()
     end)
 
     frame:SetScript("OnDragStart", function(f)
+        f.DragonUI_LayoutOffset = nil
         f:StartMoving()
         -- Ensure selected
         if addon.selectedEditorFrame ~= f and addon.SelectEditorFrame then
@@ -290,25 +336,7 @@ function LootRollModule:ShowEditorTest()
             addon.ApplySelectionTint(f)
         end
 
-        local point, x, y = addon.GetQuadrantAnchor(f)
-        if point then
-            f:ClearAllPoints()
-            f:SetPoint(point, UIParent, point, x, y)
-            f:SetUserPlaced(false)
-
-            -- Save to DB
-            if addon.db and addon.db.profile then
-                if not addon.db.profile.lootroll then
-                    addon.db.profile.lootroll = {}
-                end
-                addon.db.profile.lootroll.anchor = point
-                addon.db.profile.lootroll.x = x
-                addon.db.profile.lootroll.y = y
-            end
-
-            -- Re-attach container to new position
-            AttachContainer()
-        end
+        SaveAnchorPosition(f)
     end)
 end
 
@@ -344,3 +372,26 @@ addon.package:Subscribe(function()
     end
 end, "PLAYER_ENTERING_WORLD")
 
+-- =============================================================================
+-- AUTO ROLL (Auto Greed/DE)
+-- =============================================================================
+
+local ROLL_GREED, ROLL_DISENCHANT, GREEN_QUALITY = 2, 3, 2
+
+local function AutoRollOnLoot(_, _, rollID)
+    local cfg = addon.db and addon.db.profile and addon.db.profile.lootroll
+    if not (cfg and cfg.autoRoll) then return end
+
+    if UnitLevel("player") ~= (MAX_PLAYER_LEVEL or 80) then return end
+
+    local _, _, _, quality, bindOnPickUp, _, canGreed, canDisenchant = GetLootRollItemInfo(rollID)
+    if quality ~= GREEN_QUALITY or bindOnPickUp then return end
+
+    if canDisenchant then
+        RollOnLoot(rollID, ROLL_DISENCHANT)
+    elseif canGreed then
+        RollOnLoot(rollID, ROLL_GREED)
+    end
+end
+
+addon.package:Subscribe(AutoRollOnLoot, "START_LOOT_ROLL")

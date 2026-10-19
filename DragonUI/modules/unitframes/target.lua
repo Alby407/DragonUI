@@ -102,6 +102,7 @@ local function GetAuraCountsAndSizes(frame)
     local largeDebuffList = {}
 
     -- Large from caster (Blizzard's PLAYER_UNITS rule), not width: prior SetSize corrupts width inference.
+    local playerIsTarget = UnitIsUnit(PlayerFrame.unit or "player", unit)
     for i = 1, MAX_TARGET_BUFFS do
         local buff = _G[selfName .. "Buff" .. i]
         if not buff or not buff:IsShown() then
@@ -109,7 +110,7 @@ local function GetAuraCountsAndSizes(frame)
         end
         numBuffs = i
         local caster = select(8, UnitBuff(unit, i))
-        largeBuffList[i] = caster and PLAYER_CAST_UNITS[caster] or false
+        largeBuffList[i] = not playerIsTarget and caster and PLAYER_CAST_UNITS[caster] or false
     end
 
     for i = 1, MAX_TARGET_DEBUFFS do
@@ -126,7 +127,8 @@ local function GetAuraCountsAndSizes(frame)
 end
 
 local function UpdateAuraPositionsDetached(self, auraName, numAuras, numOppositeAuras, largeAuraList, updateFunc,
-                                           maxRowWidth, offsetX, mirrorAurasVertically, smallSize, largeSize, extraGap)
+                                           maxRowWidth, offsetX, mirrorAurasVertically, smallSize, largeSize, extraGap,
+                                           shortRows)
     local size
     extraGap = extraGap or 0
     local offsetY = AURA_OFFSET_Y + extraGap
@@ -154,6 +156,9 @@ local function UpdateAuraPositionsDetached(self, auraName, numAuras, numOpposite
             self.auraRows = self.auraRows + 1
             firstAuraOnRow = i
             offsetY = AURA_OFFSET_Y + extraGap
+            if shortRows and self.auraRows > shortRows then
+                maxRowWidth = DEFAULT_AURA_ROW_WIDTH
+            end
         else
             updateFunc(self, auraName, i, numOppositeAuras, i - 1, size, offsetX, offsetY, mirrorAurasVertically)
         end
@@ -258,6 +263,16 @@ local function UpdateDebuffAnchorDetached(self, debuffName, index, numBuffs, anc
     end
 end
 
+local function HideAuraButtons(prefix, count)
+    for i = 1, count do
+        local button = _G[prefix .. i]
+        if not button then
+            break
+        end
+        button:Hide()
+    end
+end
+
 local function ApplyDragonAuraLayout(frame)
     if not frame or not frame.unit or not UnitExists(frame.unit) then
         return
@@ -268,9 +283,30 @@ local function ApplyDragonAuraLayout(frame)
         return
     end
 
+    -- Hidden before counting, so the kind still shown lays out as if the other had none.
+    local targetConfig = frame == TargetFrame and addon.db and addon.db.profile.unitframe.target
+    local hideBuffs = targetConfig and targetConfig.show_buffs == false
+    local hideDebuffs = targetConfig and targetConfig.show_debuffs == false
+    -- Blizzard's small focus still shows 8 debuffs; "Show Buff/Debuff" off means none at all.
+    if frame == FocusFrame and frame.smallSize then
+        hideBuffs, hideDebuffs = true, true
+    end
+    if hideBuffs then
+        HideAuraButtons(frameName .. "Buff", MAX_TARGET_BUFFS)
+    end
+    if hideDebuffs then
+        HideAuraButtons(frameName .. "Debuff", MAX_TARGET_DEBUFFS)
+    end
+    local hiding = hideBuffs or hideDebuffs
+
     local detached = ShouldUseDetachedAuraLayout(frame)
+    -- Blizzard's 2 short rows are a FrameXML local; the ToT at retail's spot leaves room for a third.
+    local shortRows = not detached and not frame.buffsOnTop and frame.totFrame and frame.totFrame:IsShown()
+        and 3 or nil
     local buffSize, debuffSize = GetCustomAuraSizes()
-    if not detached and not buffSize then
+    local blizzardSpacing = not detached and not buffSize
+    -- With Blizzard's spacing only a third row beside the lowered ToT differs from Blizzard's own pass.
+    if blizzardSpacing and not hiding and (not shortRows or (frame.auraRows or 0) <= 2) then
         return
     end
     buffSize = buffSize or SMALL_AURA_SIZE
@@ -278,7 +314,7 @@ local function ApplyDragonAuraLayout(frame)
     local largeDelta = LARGE_AURA_SIZE - SMALL_AURA_SIZE
 
     local numBuffs, numDebuffs, largeBuffList, largeDebuffList = GetAuraCountsAndSizes(frame)
-    if numBuffs == 0 and numDebuffs == 0 then
+    if numBuffs == 0 and numDebuffs == 0 and not hiding then
         return
     end
 
@@ -289,18 +325,20 @@ local function ApplyDragonAuraLayout(frame)
     -- Attached mode mirrors Blizzard: shrink rows beside a visible ToT, expand back after NUM_TOT_AURA_ROWS.
     local haveToT = not detached and frame.totFrame and frame.totFrame:IsShown()
     local totRowWidth = frame.TOT_AURA_ROW_WIDTH or 101
-    local buffGap = addon.GetAuraChromeGap and addon.GetAuraChromeGap(buffSize + largeDelta) or 0
-    local debuffGap = addon.GetAuraChromeGap and addon.GetAuraChromeGap(debuffSize + largeDelta) or 0
+    local chromeGap = not blizzardSpacing and addon.GetAuraChromeGap
+    local buffGap = chromeGap and chromeGap(buffSize + largeDelta) or 0
+    local debuffGap = chromeGap and chromeGap(debuffSize + largeDelta) or 0
     local debuffOffsetX = (detached and 3 or 4) + debuffGap
 
+    local totRows = shortRows or _G.NUM_TOT_AURA_ROWS or 2
     local maxRowWidth = (haveToT and totRowWidth) or DEFAULT_AURA_ROW_WIDTH
     UpdateAuraPositionsDetached(frame, frameName .. "Buff", numBuffs, numDebuffs, largeBuffList,
         UpdateBuffAnchorDetached, maxRowWidth, 3 + buffGap, mirrorAurasVertically, buffSize, buffSize + largeDelta,
-        buffGap)
-    maxRowWidth = (haveToT and frame.auraRows < (_G.NUM_TOT_AURA_ROWS or 2) and totRowWidth) or DEFAULT_AURA_ROW_WIDTH
+        buffGap, totRows)
+    maxRowWidth = (haveToT and frame.auraRows < totRows and totRowWidth) or DEFAULT_AURA_ROW_WIDTH
     UpdateAuraPositionsDetached(frame, frameName .. "Debuff", numDebuffs, numBuffs, largeDebuffList,
         UpdateDebuffAnchorDetached, maxRowWidth, debuffOffsetX, mirrorAurasVertically, debuffSize, debuffSize + largeDelta,
-        debuffGap)
+        debuffGap, totRows)
 
     if frame.spellbar and _G.Target_Spellbar_AdjustPosition then
         _G.Target_Spellbar_AdjustPosition(frame.spellbar)
@@ -376,10 +414,8 @@ local api = UF.TargetStyle.Create({
         return {
             _G.TargetFrameTextureFrameTexture,
             _G.TargetFrameBackground,
-            _G.TargetFrameFlash,
             _G.TargetFrameNumericalThreat,
             TargetFrame.threatNumericIndicator,
-            TargetFrame.threatIndicator,
             -- ToT children (visible as part of TargetFrame even if ToT module is disabled)
             _G.TargetFrameToTBackground,
             _G.TargetFrameToTTextureFrameTexture,
@@ -400,26 +436,6 @@ local api = UF.TargetStyle.Create({
     -- After-init hooks
     -- ----------------------------------------------------------------
     afterInit = function(ctx)
-        -- Hook TargetFrame_CheckClassification for threat flash texture
-        if not ctx.Module.threatHooked then
-            hooksecurefunc("TargetFrame_CheckClassification",
-                function(self, forceNormalTexture)
-                    local threatFlash = _G.TargetFrameFlash
-                    if threatFlash then
-                        threatFlash:SetTexture(ctx.TEXTURES.THREAT)
-                        threatFlash:SetTexCoord(0, 376/512, 0, 134/256)
-                        threatFlash:SetBlendMode("ADD")
-                        threatFlash:SetAlpha(0.7)
-                        threatFlash:SetDrawLayer("ARTWORK", 10)
-                        threatFlash:ClearAllPoints()
-                        threatFlash:SetPoint("BOTTOMLEFT",
-                            TargetFrame, "BOTTOMLEFT", 2, 25)
-                        threatFlash:SetSize(188, 67)
-                    end
-                end)
-            ctx.Module.threatHooked = true
-        end
-
         -- Classification delay frame + hooks
         if not ctx.Module.classificationHooked then
             local delayFrame = CreateFrame("Frame")

@@ -261,6 +261,7 @@ function addon.CreateUIFrame(width, height, frameName)
     frame:SetMovable(false)
     
     frame:SetScript("OnDragStart", function(self, button)
+        self.DragonUI_LayoutOffset = nil
         self:StartMoving()
         -- Ensure this frame is the selected one
         if addon.selectedEditorFrame ~= self then
@@ -327,6 +328,32 @@ addon.SetNinesliceState = SetNinesliceState
 addon.ShowNineslice = ShowNineslice
 addon.HideNineslice = HideNineslice
 
+-- Grows the editor box (outline + click area) about the point the real frame hangs from; the widget itself stays put.
+-- frame.DragonUI_BoxInsets { left, right, top, bottom } first fits the outline to a smaller (or larger) widget.
+function addon.SetEditorBoxScale(frame, scale, pivot)
+    local slice = frame and frame.NineSlice
+    if not slice or (InCombatLockdown() and frame:IsProtected()) then return end
+    scale, pivot = scale or 1, pivot or "CENTER"
+    local w, h = frame:GetWidth(), frame:GetHeight()
+    local fromLeft = pivot:find("LEFT") and 0 or (pivot:find("RIGHT") and 1 or 0.5)
+    local fromTop = pivot:find("TOP") and 0 or (pivot:find("BOTTOM") and 1 or 0.5)
+    local insets = frame.DragonUI_BoxInsets or { 0, 0, 0, 0 }
+    local px, py = w * fromLeft, h * fromTop
+    -- How far each outline edge reaches past the box: the inset rect scaled about the pivot.
+    local left = -(px + (insets[1] - px) * scale)
+    local right = px + (w - insets[2] - px) * scale - w
+    local top = -(py + (insets[3] - py) * scale)
+    local bottom = py + (h - insets[4] - py) * scale - h
+    local shift = (frame.DragonUI_BoxShiftY or 0) * scale
+    slice.TopLeftCorner:SetPoint("TOPLEFT", -8 - left, 8 + top + shift)
+    slice.TopRightCorner:SetPoint("TOPRIGHT", 8 + right, 8 + top + shift)
+    slice.BottomLeftCorner:SetPoint("BOTTOMLEFT", -8 - left, -8 - bottom + shift)
+    slice.BottomRightCorner:SetPoint("BOTTOMRIGHT", 8 + right, -8 - bottom + shift)
+    slice.Center:SetPoint("TOPLEFT", -left, top + shift)
+    slice.Center:SetPoint("BOTTOMRIGHT", right, -bottom + shift)
+    frame:SetHitRectInsets(-left, -right, -(top + shift), -(bottom - shift))
+end
+
 -- ============================================================================
 -- FRAME VISIBILITY FUNCTIONS (Editor Mode Support)
 -- ============================================================================
@@ -384,6 +411,64 @@ function addon.HideUIFrame(frame, exclude)
 end
 
 -- ============================================================================
+-- FADED SHOW / HIDE
+-- ============================================================================
+
+local FADE_IN_TIME, FADE_OUT_TIME = 0.25, 0.5
+
+local function SetFadeValue(fader, value)
+    fader.value = value
+    fader.apply(value)
+end
+
+local function FaderOnUpdate(fader, elapsed)
+    local frame = fader.frame
+    if not frame:IsShown() then
+        fader.value = 0
+        fader:Hide()
+        return
+    end
+    local target = fader.target
+    local value
+    if target == 1 then
+        value = math.min(1, fader.value + elapsed / FADE_IN_TIME)
+    else
+        value = math.max(0, fader.value - elapsed / FADE_OUT_TIME)
+    end
+    SetFadeValue(fader, value)
+    if value == target then
+        fader:Hide()
+        if target == 0 then frame:Hide() end
+    end
+end
+
+-- Shows or hides frame, fading when animate; apply(value) folds the 0-1 fade into the frame's own alpha.
+function addon.SetShownFaded(frame, shown, animate, apply)
+    local fader = frame.DragonUI_Fader
+    if not fader then
+        fader = CreateFrame("Frame")
+        fader:Hide()
+        fader:SetScript("OnUpdate", FaderOnUpdate)
+        fader.frame, fader.value = frame, frame:IsShown() and 1 or 0
+        frame.DragonUI_Fader = fader
+    end
+    fader.apply, fader.target = apply, shown and 1 or 0
+
+    if not animate then
+        fader:Hide()
+        SetFadeValue(fader, fader.target)
+        if shown then frame:Show() else frame:Hide() end
+        return
+    end
+    if not frame:IsShown() then
+        if not shown then return end
+        SetFadeValue(fader, 0)
+        frame:Show()
+    end
+    if fader.value ~= fader.target then fader:Show() else fader:Hide() end
+end
+
+-- ============================================================================
 -- POSITION SAVE/LOAD FUNCTIONS
 -- ============================================================================
 
@@ -394,6 +479,13 @@ function addon.SaveUIFramePosition(frame, configPath1, configPath2)
     end
 
     local anchor, _, _, posX, posY = frame:GetPoint(1)
+
+    -- A module's automatic shift from the default spot (e.g. the pet bar stacked over stances) is not a move.
+    local layoutOffset = frame.DragonUI_LayoutOffset
+    if layoutOffset and posX and posY then
+        posX = posX - layoutOffset[1]
+        posY = posY - layoutOffset[2]
+    end
 
     -- Strip dual-bar offset from positions of affected widgets so the
     -- database always stores the *base* position.  Without this, closing
@@ -407,7 +499,7 @@ function addon.SaveUIFramePosition(frame, configPath1, configPath2)
        and addon.GetDualBarVerticalOffset and addon.IsWidgetAtDefaultPosition
        and addon.IsWidgetAtDefaultPosition(configPath2) then
         local offset = addon.GetDualBarVerticalOffset()
-        if offset > 0 and posY then
+        if offset ~= 0 and posY then
             posY = posY - offset
         end
     end
@@ -506,6 +598,23 @@ function addon.ApplyWidgetPositionFromDB(widgetKey, frame)
     frame:SetPoint(anchor, UIParent, anchor, posX, posY)
 end
 
+local function PointCoords(frame, point)
+    local left, right, top, bottom = frame:GetLeft(), frame:GetRight(), frame:GetTop(), frame:GetBottom()
+    if not (left and right and top and bottom) then return nil end
+    local x = point:find("LEFT") and left or (point:find("RIGHT") and right or (left + right) / 2)
+    local y = point:find("TOP") and top or (point:find("BOTTOM") and bottom or (top + bottom) / 2)
+    return x, y
+end
+
+-- SetPoint(point, UIParent, relativePoint, x, y) offsets that keep `frame` in place, read off its edges (GetPoint skews).
+function addon.GetAnchorOffset(frame, point, relativePoint)
+    local fx, fy = PointCoords(frame, point)
+    local ux, uy = PointCoords(UIParent, relativePoint or point)
+    if not (fx and ux) then return nil end
+    local ratio = UIParent:GetEffectiveScale() / frame:GetEffectiveScale()
+    return fx - ux * ratio, fy - uy * ratio
+end
+
 -- Apply frame position from database
 function addon.ApplyUIFramePosition(frame, configPath)
     if not frame or not configPath then
@@ -574,6 +683,9 @@ function addon:RegisterEditableFrame(frameInfo)
         hideTest = frameInfo.hideTest,            -- Function to hide fake frame
         hasTarget = frameInfo.hasTarget,          -- Function to check if should be visible
         editorVisible = frameInfo.editorVisible,  -- Function to check if frame should appear in editor mode
+        resetPosition = frameInfo.resetPosition,  -- Optional: the module's own way back to its default spot
+        applyPosition = frameInfo.applyPosition,  -- Optional: re-places the frame from the DB with the module's own shifts
+        isDefaultPosition = frameInfo.isDefaultPosition, -- Optional: true when resetPosition would change nothing
         module = frameInfo.module                 -- Reference to the module
     }
     
@@ -670,6 +782,9 @@ local DEFAULT_LEGACY_REFRESH_TARGETS = {
     { name = "targetframe", funcName = "RefreshTargetFrame", order = 900 },
     { name = "focusframe", funcName = "RefreshFocusFrame", order = 910 },
     { name = "partyframes", funcName = "RefreshPartyFrames", order = 920 },
+    { name = "totframe", funcName = "RefreshToTFrame", order = 930 },
+    { name = "tofframe", funcName = "RefreshToFFrame", order = 940 },
+    { name = "petframe", funcName = "RefreshPetFrame", order = 950 },
 }
 
 local function ResolveRegistryFunction(info, phase)
@@ -1042,7 +1157,7 @@ function addon:RegisterModule(name, moduleTable, displayName, description, optio
     return MR:Register(name, moduleTable, displayName, description, options)
 end
 
--- No external callers: DEFAULT_LEGACY_REFRESH_TARGETS covers the three frames that need it. Kept as the
+-- No external callers: DEFAULT_LEGACY_REFRESH_TARGETS covers the frames that need it. Kept as the
 -- supported way to add one without editing this file.
 function addon:RegisterLegacyRefreshTarget(name, funcName, order)
     return MR:RegisterLegacyRefreshTarget(name, funcName, order)
@@ -1259,6 +1374,136 @@ function addon:After(delay, callback)
     end)
 end
 
+-- ============================================================================
+-- TEXTURE WARMUP
+-- ============================================================================
+
+-- The client loads a texture on the first frame that draws it; a 1024x1024 TGA stalls that frame ~75 ms.
+local warmupProviders = {}
+
+-- provider() returns a texture path, a list of paths or nil; it runs once, at the first PLAYER_ENTERING_WORLD.
+function addon:RegisterTextureWarmup(provider)
+    if type(provider) == "function" then
+        warmupProviders[#warmupProviders + 1] = provider
+    end
+end
+
+local function RunTextureWarmup()
+    local holder, seen = nil, {}
+    for _, provider in ipairs(warmupProviders) do
+        local ok, files = pcall(provider)
+        if not ok then
+            addon:Debug("texture warmup:", files)
+        else
+            if type(files) == "string" then files = { files } end
+            if type(files) == "table" then
+                for _, file in ipairs(files) do
+                    if type(file) == "string" and not seen[file] then
+                        seen[file] = true
+                        holder = holder or CreateFrame("Frame", nil, UIParent)
+                        local texture = holder:CreateTexture(nil, "ARTWORK")
+                        texture:SetAllPoints()
+                        texture:SetAlpha(0)
+                        texture:SetTexture(file)
+                    end
+                end
+            end
+        end
+    end
+    if not holder then return end
+    holder:SetFrameStrata("BACKGROUND")
+    holder:SetSize(64, 64)
+    holder:SetPoint("CENTER")
+    -- The first frame after PLAYER_ENTERING_WORLD renders before the world shows; hidden regions keep their textures.
+    local frames = 0
+    holder:SetScript("OnUpdate", function(self)
+        frames = frames + 1
+        if frames >= 2 then
+            self:SetScript("OnUpdate", nil)
+            self:Hide()
+        end
+    end)
+end
+
+local warmupEvents = CreateFrame("Frame")
+warmupEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
+warmupEvents:SetScript("OnEvent", function(self)
+    self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+    RunTextureWarmup()
+end)
+
+-- ============================================================================
+-- INSPECT REPLY TRACKING
+-- ============================================================================
+
+-- The reply event carries no unit and the client holds one reply at a time, so whose it is lives here.
+local inspectedGUID           -- player named by the latest inspect request
+local inspectAnswered = false -- whether the server has replied for inspectedGUID
+local everAnswered = false
+local inspectCallbacks = {}
+
+-- Only used while this server has never answered an inspect, so a silent server still gets numbers.
+local SILENT_SERVER_WAIT = 2
+
+local function FireInspectCallbacks()
+    local owner = inspectAnswered and inspectedGUID or nil
+    for i = 1, #inspectCallbacks do
+        inspectCallbacks[i](owner)
+    end
+end
+
+-- callback(ownerGUID): ownerGUID is nil while no reply is loaded
+function addon:RegisterInspectDataCallback(callback)
+    if type(callback) == "function" then
+        tinsert(inspectCallbacks, callback)
+    end
+end
+
+-- Until true, inventory queries on the unit return its visible gear: the transmog skin on such servers.
+function addon:IsInspectDataFor(unit)
+    return inspectAnswered and unit ~= nil and UnitGUID(unit) == inspectedGUID
+end
+
+hooksecurefunc("NotifyInspect", function(unit)
+    local guid = unit and UnitGUID(unit)
+
+    -- Re-requesting the same player keeps their reply: it is still their real gear.
+    if guid ~= inspectedGUID then
+        inspectedGUID = guid
+        if inspectAnswered then
+            inspectAnswered = false
+            FireInspectCallbacks()
+        end
+    end
+
+    if guid and not everAnswered then
+        addon:After(SILENT_SERVER_WAIT, function()
+            if not everAnswered and not inspectAnswered and inspectedGUID == guid then
+                inspectAnswered = true
+                FireInspectCallbacks()
+            end
+        end)
+    end
+end)
+
+hooksecurefunc("ClearInspectPlayer", function()
+    inspectedGUID = nil
+    if inspectAnswered then
+        inspectAnswered = false
+        FireInspectCallbacks()
+    end
+end)
+
+local inspectEventFrame = CreateFrame("Frame")
+inspectEventFrame:RegisterEvent("INSPECT_TALENT_READY")
+inspectEventFrame:SetScript("OnEvent", function()
+    everAnswered = true
+    if inspectedGUID then
+        inspectAnswered = true
+        FireInspectCallbacks()
+    end
+end)
+
 function addon:SafeSetAtlas(texture, atlasName, useAtlasSize)
     if not texture or not atlasName then
         return false
@@ -1332,6 +1577,15 @@ function addon:ApplyDatabaseMigrations()
         nameplates.showHealthNumber, nameplates.showHealthPercent = nil, nil
     end
 
+    -- Aura borders: the rounded/square flag became a style; only an explicit square survives the new default.
+    local auraborders = modules and rawget(modules, "auraborders")
+    if auraborders and rawget(auraborders, "custom_border") ~= nil then
+        if auraborders.custom_border == false then
+            auraborders.border_style = "square"
+        end
+        auraborders.custom_border = nil
+    end
+
     -- profile.chat had no readers left; clear stored values now that the default is gone.
     if rawget(profile, "chat") ~= nil then
         profile.chat = nil
@@ -1342,6 +1596,15 @@ function addon:ApplyDatabaseMigrations()
     local extrabar1 = additional and rawget(additional, "extrabar1")
     if extrabar1 then
         extrabar1.slots = nil
+    end
+
+    -- Auto-accept: the one friends-and-guild toggle became one toggle each.
+    local autoaccept = rawget(profile, "autoaccept")
+    if autoaccept and rawget(autoaccept, "party") ~= nil then
+        if autoaccept.party == true then
+            autoaccept.friends, autoaccept.guild = true, true
+        end
+        autoaccept.party = nil
     end
 
     local global = self.db.global

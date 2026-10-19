@@ -755,6 +755,26 @@ function BuffFrameModule:SetupWeaponEnchantSeparation()
                 self:UpdateWeaponEnchantPosition()
                 AnchorWeaponEnchantsToFrame()
             end,
+            onNudge = function()
+                local w = addon.db.profile.widgets.weapon_enchants
+                if w then
+                    w.custom_position = true
+                end
+                self:UpdateWeaponEnchantPosition()
+                AnchorWeaponEnchantsToFrame()
+            end,
+            -- At default the frame sits on its own constants, not the saved spot; custom_position only updates on close.
+            resetPosition = function()
+                local w = addon.db.profile.widgets.weapon_enchants
+                if w then w.custom_position = false end
+                self:UpdateWeaponEnchantPosition()
+                AnchorWeaponEnchantsToFrame()
+            end,
+            isDefaultPosition = function()
+                local x, y = addon.GetAnchorOffset(dragonUIWeaponBuffFrame, WEAPON_DEFAULT_ANCHOR, "TOPRIGHT")
+                if not x then return true end
+                return math.abs(x - WEAPON_DEFAULT_POSX) <= 1 and math.abs(y - WEAPON_DEFAULT_POSY) <= 1
+            end,
             module = self
         })
     end
@@ -827,6 +847,12 @@ function BuffFrameModule:Enable()
             w.custom_position = not isDefault
             self:UpdatePosition()
         end,
+        onNudge = function()
+            local w = addon.db.profile.widgets.buffs
+            if w and not w.custom_position then
+                w.custom_position = true
+            end
+        end,
         module = self
     })
 
@@ -863,6 +889,13 @@ function BuffFrameModule:Enable()
             blizzardFrame = _G["DebuffButton1"],
             configPath = {"widgets", "debuffs"},
             onHide = function()
+                if FixDebuffPositions then FixDebuffPositions() end
+            end,
+            onNudge = function()
+                local w = addon.db.profile.widgets.debuffs
+                if w and not w.custom_position then
+                    w.custom_position = true
+                end
                 if FixDebuffPositions then FixDebuffPositions() end
             end,
             module = self
@@ -1288,6 +1321,20 @@ function BuffFrameModule:Enable()
             if debuffFixPending then return end
             debuffFixPending = true
             debuffFixFrame:Show()
+        end)
+    end
+
+    -- Hidden per button as Blizzard shows it, so a hidden debuff never draws for a frame.
+    if not BuffFrameModule._hookedDebuffVisibility then
+        BuffFrameModule._hookedDebuffVisibility = true
+        hooksecurefunc("AuraButton_Update", function(buttonName, index)
+            if buttonName ~= "DebuffButton" then return end
+            local cfg = GetBuffsConfig()
+            if not (cfg and cfg.enabled and cfg.show_debuffs == false) then return end
+            local button = _G[buttonName .. index]
+            if button then
+                button:Hide()
+            end
         end)
     end
 

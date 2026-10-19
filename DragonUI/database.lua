@@ -14,12 +14,16 @@ local _arialn = addon.Fonts and addon.Fonts.ARIALN or "Fonts\\ARIALN.TTF"
 local defaults = {
     global = {
         locale = "auto", -- UI language override; "auto" follows the client locale
+        numberUnits = "auto", -- Large-number units: "auto" keeps 만/억 or 万/亿 on those clients, "western" forces k/M
         defaultProfile = "", -- Profile new characters start on; "" gives each its own
         bagsterCache = {}, -- Per-character bank snapshot (realm|name keys); used by bagster module
         characterMoney = {}, -- Gold per character (realm|name keys); used by the altmoney tooltip
         questLootLearned = {}, -- Learned quest loot sources for nameplates: [mobName] = {objectiveText=true}
         talentBuilds = {}, -- Saved talent builds per class: [CLASS] = { {name, ranks[tab][index], reqLevel}, ... }
-        auraDurations = {} -- Observed debuff durations for nameplates: [spellId] = seconds
+        auraDurations = {}, -- Observed debuff durations for nameplates: [spellId] = seconds
+        addonIcons = {}, -- Addon manager icons learned from loaded addons: [lowercase folder] = { icon, coords }
+        itemOwnership = { version = 1, realms = {} }, -- Per-realm, per-character item counts for the tooltip module
+        optionsPanelScale = 1 -- Settings window scale on top of the UI scale
     },
     profile = {
         -- Keep at 1: version-less legacy profiles read this default and must still run migrations.
@@ -163,8 +167,11 @@ local defaults = {
             lfgframe = {
                 anchor = "BOTTOMRIGHT",
                 posX = -270,
-                posY = 20,
+                posY = 50,
                 tooltip_position = "TOP"
+            },
+            durability = {
+                custom_position = false
             },
             tooltip = {
                 anchor = "BOTTOMRIGHT",
@@ -188,7 +195,88 @@ local defaults = {
                 anchor = "TOP",
                 posX = 0,
                 posY = -180
+            },
+            personalresource = {
+                anchor = "CENTER",
+                posX = 0,
+                posY = -110
+            },
+            swingtimer_mainhand = {
+                anchor = "BOTTOM",
+                posX = 0,
+                posY = 285
+            },
+            swingtimer_offhand = {
+                anchor = "BOTTOM",
+                posX = 0,
+                posY = 260
+            },
+            swingtimer_ranged = {
+                anchor = "BOTTOM",
+                posX = 0,
+                posY = 235
             }
+        },
+        -- Personal Resource Display: settings (the enable flag is modules.personalresource.enabled)
+        personalresource = {
+            size = 100,           -- Frame scale in percent (editor slider 70-150)
+            bar_width = 100,      -- Width in percent of the 200-unit base (50-150)
+            health_height = 15,   -- Health bar height (10-30)
+            power_height = 15,    -- Power and alternate power bar height (10-30)
+            padding = 0,          -- Extra gap between bars on top of the 4-unit minimum (0-10)
+            opacity = 100,        -- Percent (50-100)
+            visibility = "always", -- always | combat | hidden
+            hide_health = false,
+            hide_power = false,
+            hide_alt_power = false, -- Druid mana while shapeshifted
+            class_color = false,  -- Health bar in the class colour
+            bar_text = false,     -- Percentage and value on the bars
+        },
+        -- Level-up banner (the enable flag is modules.levelupenhance.enabled; position in widgets.levelupenhance)
+        levelupenhance = {
+            scale = 1,            -- Banner and list scale (0.6-1.6)
+            show_unlocks = true,  -- Show what the level unlocks (abilities, features, dungeons, raids, battlegrounds)
+            auto_expand = true,   -- Open the list on its own, as retail shows the unlocks without a click
+            unlock_style = "banner", -- banner: one at a time inside the banner, as retail | list: a list under it
+            chat_unlocks = true,  -- Print the unlocks in the windows that get the level-up message
+            pet_levelup = true,   -- Banner when a hunter pet levels up
+        },
+        -- Combo points (the enable flag is modules.combopoints.enabled)
+        combopoints = {
+            location = "auto",    -- auto | both | player | target; auto follows unitframe.frame_style
+            style = "auto",       -- auto | dragonui | forever: art of the orbs (retail or c60); auto follows unitframe.frame_style
+            hide_empty = false,   -- Hide the orbs at 0 points instead of showing empty ones
+            detached = false,     -- Player bar moved in the editor: follows widgets.combopoints instead of the player frame
+        },
+        -- Swing timers, one table per bar (the enable flag is modules.swingtimer.enabled)
+        swingtimer = {
+            mainhand = {
+                scale = 100,          -- Percent (50-200)
+                opacity = 100,        -- Percent (50-100)
+                width = 307,          -- Units (153-613); Forever's 426 at our HUD's 0.72
+                height = 22,          -- Units (11-43); Forever's 30 at our HUD's 0.72
+                show_title = true,
+                show_time = true,
+                visibility = "combat", -- always | combat | hidden
+            },
+            offhand = {
+                scale = 100,
+                opacity = 100,
+                width = 307,
+                height = 22,
+                show_title = true,
+                show_time = true,
+                visibility = "combat",
+            },
+            ranged = {
+                scale = 100,
+                opacity = 100,
+                width = 307,
+                height = 22,
+                show_title = true,
+                show_time = true,
+                visibility = "combat",
+            },
         },
         -- Quest Tracker
         questtracker = {
@@ -210,6 +298,12 @@ local defaults = {
             anchor = "BOTTOM",
             x = 0,
             y = 220,
+            autoRoll = false, -- Auto greed/disenchant green BoE rolls at max level
+        },
+        -- Party Invites
+        autoaccept = {
+            friends = false, -- Accept party invites from players on the friends list
+            guild = false, -- Accept party invites from guild members
         },
         -- ACTIONBAR SETTINGS
         mainbars = {
@@ -409,6 +503,7 @@ local defaults = {
         buttons = {
             only_actionbackground = true,
             hide_main_bar_background = false,
+            tooltips = "always", -- "always", "combat" (hidden in combat) or "never"
             count = {
                 show = true
             },
@@ -432,6 +527,7 @@ local defaults = {
             cooldown = {
                 color = {1, 1, 1, 1},
                 min_duration = 3,
+                whole_seconds = false,
                 font = {_arialn, 16, "OUTLINE"},
                 font_size = 16,
                 position = {'CENTER', 0, 1}
@@ -478,7 +574,7 @@ local defaults = {
             },
             extrabar1 = {
                 x_position = 0,
-                y_position = 260,
+                y_position = 0, -- screen centre
                 scale = 0.9, -- container SetScale, like mainbars scale_actionbar
                 size = 36,
                 spacing = 7, -- match mainbars.button_spacing / per-bar default
@@ -496,8 +592,13 @@ local defaults = {
         -- MINIMAP SETTINGS
         minimap = {
             scale = 1,
+            style = "dragonui", -- "dragonui", "dragonui_square", "forever" or "forever_square"
+            forever_square_border = "frame", -- "frame" (the Forever ring made square) or "thin" (a thin box border)
+            forever_square_rounded = false, -- Forever frame on the square: rounded corners instead of right angles
+            square_top_arrow = true, -- Forever square: north pointer on the top edge
             border_alpha = 1,
             blip_skin = true, -- true = new/modern style, false = old/classic Blizzard style
+            ping_sender = true, -- Name of whoever pinged the minimap, in their class color
             tracking_icons = true,
             zoom_buttons = false,
             calendar = true,
@@ -506,11 +607,14 @@ local defaults = {
             player_arrow_size = 40,
             zonetext_font_size = 12,
             settings_button_angle = 203,
+            farm_mode_enabled = false, -- Bigger map, chrome hidden; toggled by /dui farm or the panel
+            farm_mode_scale = 1.5, -- Extra scale on top of minimap.scale (clamped to 1-2)
             collector_enabled = true,
             collector_style = "dragonui",
             animated_border_enabled = false,
             animated_border_scale = 0.9,
             animated_border_preset = "drg_preset_01",
+            animated_border_square_preset = "drg_square_01",
             animated_border_animations = true,
             animated_border_opacity = 1,
             animated_border_hide_dragonui_border = false,
@@ -528,6 +632,7 @@ local defaults = {
             show_toggle_button = true,
             buffs_hidden = false,
             separate_weapon_enchants = false,
+            show_debuffs = true,
             buff_horizontal_gap = 0,
             debuff_horizontal_gap = 0,
             buff_scale = 1,
@@ -559,6 +664,8 @@ local defaults = {
             modernIconBorder = true,
             holdTime = 0.3,
             holdTimeInterrupt = 0.8,
+            interruptShake = true, -- retail-style shake when the player's cast is interrupted
+            showInterrupter = true, -- "Interrupted by <name>" on interrupted casts
 
             -- LATENCY INDICATOR (PLAYER ONLY)
             latency = {
@@ -584,6 +691,7 @@ local defaults = {
                 modernIconBorder = true,
                 holdTime = 0.3,
                 holdTimeInterrupt = 0.8,
+                showInterrupter = true,
                 anchorFrame = 'TargetFrame',
                 anchor = 'TOP',
                 anchorParent = 'BOTTOM'
@@ -606,6 +714,7 @@ local defaults = {
                 modernIconBorder = true,
                 holdTime = 0.3,
                 holdTimeInterrupt = 0.8,
+                showInterrupter = true,
                 anchorFrame = 'FocusFrame',
                 anchor = 'TOP',
                 anchorParent = 'BOTTOM'
@@ -615,6 +724,10 @@ local defaults = {
         -- UNIT FRAMES SETTINGS
         unitframe = {
             scale = 1.0, -- Global scale for all unit frames
+            frame_style = "dragonui", -- "dragonui" or "forever": art of every unit frame at once (uf_skins.lua)
+            dragon_style = "auto", -- "auto" (follows frame_style), "dragonui" or "forever": elite dragons, with either art
+            level_style = "auto", -- "auto" (follows frame_style), "dragonui" or "forever"; the name moves with it
+            center_names = false, -- Centre player/target/focus names in the Forever name spot instead of left
             player = {
                 enabled = true,
                 breakUpLargeNumbers = true,
@@ -622,13 +735,17 @@ local defaults = {
                 classcolor = false,
                 classPortrait = false, -- Show class icon instead of character portrait
                 alternativeClassIcons = false, -- Use DragonUI alternative class icons for class portraits
+                portrait_off = false, -- Portrait-off frame: the portrait art without its ring (uf_compact.lua)
                 textFormat = "both",
                 showHealthTextAlways = false,
                 showManaTextAlways = false,
                 dragon_decoration = "none",
+                show_pvp_icon = true,
+                pvp_icon_style = "auto", -- "auto" (follows frame_style), "classic" or "forever" (Forever's round badge)
                 alwaysShowAlternateManaText = false,
                 alternateManaFormat = "both",
                 show_runes = true, -- DK rune display (used by player.lua)
+                runes_detached = false, -- DK runes moved in the editor: follow widgets.dkrunes instead of the player frame
                 show_rest_glow = true, -- Show golden glow when resting (inn/city)
                 combat_flash_enabled = true, -- Enable combat flash pulse animation
                 combat_flash_opacity = 1.0, -- Opacity multiplier for combat flash (0.0 - 1.0)
@@ -655,12 +772,17 @@ local defaults = {
                 classcolor = false,
                 classPortrait = false, -- Show class icon instead of character portrait
                 alternativeClassIcons = false, -- Use DragonUI alternative class icons for class portraits
+                portrait_off = false, -- Portrait-off frame: the portrait art without its ring (uf_compact.lua)
                 breakUpLargeNumbers = true,
                 textFormat = 'both',
                 showHealthTextAlways = false,
                 showManaTextAlways = false,
                 enableThreatGlow = true,
                 show_name_background = true,
+                show_pvp_icon = true,
+                pvp_icon_style = "auto",
+                show_buffs = true,
+                show_debuffs = true,
                 scale = 1.0,
                 -- Also fades Target of Target and the target cast bar (see target_style.lua)
                 show_on_hover = false,
@@ -671,12 +793,15 @@ local defaults = {
                 classcolor = false,
                 classPortrait = false, -- Show class icon instead of character portrait
                 alternativeClassIcons = false, -- Use DragonUI alternative class icons for class portraits
+                portrait_off = false, -- Portrait-off frame: the portrait art without its ring (uf_compact.lua)
                 breakUpLargeNumbers = true,
                 textFormat = 'both',
                 showHealthTextAlways = false,
                 showManaTextAlways = false,
                 show_buff_debuff = true,
                 show_name_background = true,
+                show_pvp_icon = true,
+                pvp_icon_style = "auto",
                 scale = 0.9,
                 -- Also fades Target of Focus and the focus cast bar (see target_style.lua)
                 show_on_hover = false,
@@ -688,7 +813,7 @@ local defaults = {
                 textFormat = 'numeric',
                 showHealthTextAlways = false,
                 showManaTextAlways = false,
-                enableThreatGlow = false,
+                enableThreatGlow = true,
                 scale = 1.0,
                 override = false,
                 x = 18,
@@ -707,6 +832,7 @@ local defaults = {
                 orientation = 'vertical',
                 padding_vertical = 30,
                 padding_horizontal = 50,
+                pvp_icon_style = "classic", -- not "auto": party keeps the classic icon on the Forever art too
                 scale = 1.0,
                 override = false,
                 anchor = 'TOPLEFT',
@@ -721,9 +847,10 @@ local defaults = {
                 classcolor = false,
                 classPortrait = false, -- Show class icon instead of character portrait
                 alternativeClassIcons = false, -- Use DragonUI alternative class icons for class portraits
+                portrait_off = false, -- Portrait-off frame: the portrait art without its ring (uf_compact.lua)
                 scale = 1.0,
-                x = -27,
-                y = -14,
+                x = -35,
+                y = -30,
                 override = false,
                 anchor = 'BOTTOMRIGHT',
                 anchorParent = 'BOTTOMRIGHT',
@@ -733,9 +860,10 @@ local defaults = {
                 classcolor = false,
                 classPortrait = false, -- Show class icon instead of character portrait
                 alternativeClassIcons = false, -- Use DragonUI alternative class icons for class portraits
+                portrait_off = false, -- Portrait-off frame: the portrait art without its ring (uf_compact.lua)
                 scale = 1.0,
-                x = -27,
-                y = -14,
+                x = -35,
+                y = -30,
                 override = false,
                 anchor = 'BOTTOMRIGHT',
                 anchorParent = 'BOTTOMRIGHT',
@@ -839,7 +967,10 @@ local defaults = {
                 enabled = true -- Apply DragonUI main action bars, status bars (XP/Rep), scaling, and positioning system
             },
             merchant = {
-                enabled = true -- Retail-style vendor window chrome, sell-all-junk button, and buyback undo arrow
+                enabled = true, -- Retail-style vendor window chrome, sell-all-junk button, and buyback undo arrow
+                autoRepair = false, -- Repair all items automatically when a merchant window opens
+                autoRepairGuild = false, -- Pay for automatic repairs with guild bank funds when they cover the cost
+                autoSellJunk = false -- Sell all grey (junk) items automatically when a merchant window opens
             },
             questdialog = {
                 enabled = true -- Retail-style quest and gossip window chrome
@@ -857,7 +988,7 @@ local defaults = {
             auraborders = {
                 enabled = true, -- Modern DF-style borders on buff/debuff icons (player/target/focus)
                 buff_color = { r = 0.2, g = 0.2, b = 0.2 }, -- neutral buff chrome over white mask; debuffs use dispel-type color
-                custom_border = true, -- border style: true = rounded (custom texture overlay), false = square (solid lines)
+                border_style = "detailed", -- "detailed" (action-bar art), "rounded" (tinted white frame) or "square" (solid lines)
                 -- When true, login ApplyDarkMode must not overwrite buff_color (user set it in Auras).
                 buff_color_user_override = false,
             },
@@ -872,6 +1003,15 @@ local defaults = {
             },
             levelupenhance = {
                 enabled = true, -- Enhanced level-up notification with animated frame
+            },
+            personalresource = {
+                enabled = false, -- Small health and power bar under the character (settings in editor mode)
+            },
+            combopoints = {
+                enabled = true, -- Retail orb bar under the player and/or small orbs on the target (Options > Unit Frames)
+            },
+            swingtimer = {
+                enabled = false, -- Main hand, off hand and ranged swing bars (settings in editor mode)
             },
             darkmode = {
                 enabled = false, -- Apply darker tinted textures to UI chrome
@@ -906,6 +1046,7 @@ local defaults = {
                 castBarPvPAggressive = false, -- legacy reaction filter (no longer exposed in UI)
                 showPartyRaidCastBars = true, -- show cast bars on party/raid member nameplates
                 castBarModernIconBorder = true, -- action-bar style frame around the cast icon
+                castBarModernIconLeft = false, -- Modern style: spell icon left of the cast bar instead of under it
                 castBarHeight = 9, -- height of the cast bar in pixels
                 castBarGap = 3, -- vertical gap between health, power, and cast bars
                 showCastBarSpellName = false, -- show the spell name text on the cast bar (the modern skin turns it on)
@@ -1018,7 +1159,8 @@ local defaults = {
                 friendlyNameOnlyTitle = false, -- show the player's title inline via UnitPVPName (e.g. "Arthas Jenkins")
                 friendlyNameOnlyAFK = false, -- show <AFK> for away friendly players in headline mode
                 friendlyNPCNameOnly = false, -- headline mode for friendly NPCs
-                friendlyNPCNameOnlyTitle = false, -- show <Title/Occupation> subtitle for friendly NPCs (awesome_wotlk only)
+                friendlyNPCNameOnlyTitle = false, -- show <Title/Occupation> subtitle for friendly NPCs (token or unit cache)
+                unitCacheRemember = true, -- keep learned players and NPC titles between sessions (per realm / per locale)
                 headlineExcludeTarget = false, -- keep health/power/cast bars on the current target while headline mode is active
                 enemyPlayerClassColors = false, -- use class colors for enemy player nameplates (ShowClassColorInNameplate)
                 disableNonTargetFade = false, -- when true, target/non-target use the same full opacity
@@ -1066,6 +1208,8 @@ local defaults = {
                 target_of_target = true, -- Show target-of-target line
                 health_bar = true, -- Show health bar on tooltip
                 anchor_cursor = false, -- Anchor tooltip to cursor
+                anchor_cursor_x = 20, -- X offset from the cursor
+                anchor_cursor_y = 20, -- Y offset from the cursor
                 show_aura_source = true, -- Show caster name on buff/debuff tooltips
                 show_aura_spell_id = false, -- Show spell ID on buff/debuff tooltips
             },
@@ -1075,7 +1219,7 @@ local defaults = {
             },
             characterpanel = {
                 enabled = true, -- Retail-style reskin of the Blizzard character window
-                class_portrait = true, -- Class icon in the portrait instead of the player's face
+                portrait_style = "spec", -- Portrait art: "character" face, "class" icon or "spec" icon
                 class_level_text = true, -- Class-colored "Level X Race Class" line
                 dark_background = false, -- Tint the panel's stone grounds down; the cog toggles it
                 grey_model_backdrop = true, -- Desaturate and dim the race backdrop behind the model
@@ -1097,6 +1241,7 @@ local defaults = {
                 font_outline = "THICKOUTLINE", -- NONE|OUTLINE|THICKOUTLINE (no real bold in 3.3.5a)
                 position = "BOTTOM", -- BOTTOM|CENTER|TOP vertical placement on the icon
                 show_average = true, -- Average item level on the character/inspect panel
+                show_durability = false, -- Durability % on the character panel slots
                 tooltip_cvar = false, -- Also set Blizzard's showItemLevel CVar (tooltip line)
                 -- Per-context toggles
                 bags = true,
@@ -1111,9 +1256,13 @@ local defaults = {
                 mail = true,
                 auction = true,
             },
+            itemownership = {
+                enabled = false, -- Show per-character bag, bank and equipped counts in item tooltips
+            },
             chatmods = {
                 enabled = true, -- Chat enhancements: hide buttons, editbox position, URL copy, chat copy
                 linkHoverTooltip = false, -- Show supported chat-link tooltips without holding Alt
+                classColorNames = false, -- Class-color player names in every chat type and channel
                 editbox = "bottom", -- Editbox position: "top", "bottom", or "middle"
                 tabIdleAlpha = 0, -- Tab opacity when not hovered (0 = hidden, 1 = fully visible)
                 chatStyle = "none", -- Chat frame background style: "none", "dark", "dragon", "midnight"
@@ -1133,6 +1282,7 @@ local defaults = {
                 glow_quest = true, -- Golden border on quest items
                 glow_alpha = 1, -- Quality ring opacity
                 show_quality_filter = true, -- Rarity filter dots centered on the bottom band
+                tooltip_count = true, -- Total owned (bags + bank) line on item tooltips
             },
             bags_skin = {
                 enabled = true -- Experimental retail-style bag window skin
@@ -1140,6 +1290,7 @@ local defaults = {
             loot_skin = {
                 enabled = true, -- Retail-style skin for the Blizzard loot window
                 animated_reflow = true, -- Compact collected loot with animated rows and panel resizing
+                auto_hide_empty = false, -- Close the loot window when there is nothing left to loot
             },
             bagsort = {
                 enabled = true, -- Sort bags and bank items with buttons
@@ -1177,6 +1328,12 @@ local defaults = {
                 rankSelectorShown = true, -- Offer the lower-rank selector on spell cards at all
                 highlightUnbound = false, -- Pulse learned spells that sit on no action bar slot
             },
+            professions = {
+                enabled = true, -- Forever professions window built on Blizzard's TradeSkillFrame
+                scale = 1, -- Scale of the whole window (0.6–1.2); its UIPanel slot grows and shrinks with it
+                tabScale = 0.9, -- Scale of the side tabs alone (0.5–1), on top of the window's
+                micro_button = true, -- Professions button in the micro menu, after Character; it opens the Overview
+            },
             worldmap = {
                 enabled = true, -- Retail-style world map with breadcrumb navigation and a quest log side panel
                 questLog = true, -- Quest log side panel open
@@ -1190,6 +1347,7 @@ local defaults = {
                 inns = true, -- Innkeeper pins on zone maps, the hearthstone's inn drawn larger
                 coordinates = true, -- Cursor and player coordinates in the canvas corner
                 zoneLevels = true, -- Recommended level ranges beside zone names and instance pins
+                groupPins = "color", -- Party/raid pins on the world and battlefield maps: "blizzard", "color" or "icon"
                 fadeWhenMoving = false, -- Dim the map while you move with the cursor off it
                 moveAlpha = 0.4, -- Alpha the map fades to while moving
             },
@@ -1202,6 +1360,16 @@ local defaults = {
                 useClassColor = false, -- Use player class color instead of flashColor
                 flashOpacity = 0.35, -- Max alpha of the flash (0.0–1.0)
                 flashExtent = 40,  -- Pixels from screen edges toward center
+            },
+            addonmanager = {
+                enabled = true, -- AddOns button in the Esc menu opening the in-game addon list
+                scale = 1, -- Addon list window scale on top of the UI scale
+            },
+            mail = {
+                enabled = true, -- Retail-style mail window with the Open All button
+            },
+            taxiframe = {
+                enabled = true, -- Retail-style flight master map window
             },
         },
 

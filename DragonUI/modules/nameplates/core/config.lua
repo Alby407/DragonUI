@@ -41,6 +41,10 @@ end
 -- Effective off-target mode for one CLEU source (hybrid splits player vs NPC).
 function NP.config.ResolveEffectiveCastMode(cfg, sourceIsPlayer)
     local mode = NP.config.GetOffTargetCastMode(cfg)
+    -- Unit tokens (awesome_wotlk) or plate cast bars on every plate (patched exe) already say who casts.
+    if (mode == "aggressive" or mode == "hybrid") and (C_NamePlate or NP.module._nativeCastPatch) then
+        return "safe"
+    end
     if mode ~= "hybrid" then
         return mode
     end
@@ -103,9 +107,19 @@ function NP.config.GetCastBarMetrics()
     return cfg.castBarHeight or barH, NP.config.GetStackBarGap()
 end
 
+-- The click area is the plate's rect, so a raised stack lifts the plate; retail stacking owns that clamp.
+function NP.config.GetClickLift()
+    local cfg = NP.config.GetCfg()
+    local oy = cfg.offsetY or 0
+    if oy > 0 and cfg.retailStackingEnabled ~= true then
+        return oy
+    end
+    return 0
+end
+
 function NP.config.GetStackOffset()
     local cfg = NP.config.GetCfg()
-    return cfg.offsetX or 0, cfg.offsetY or 0
+    return cfg.offsetX or 0, (cfg.offsetY or 0) - NP.config.GetClickLift()
 end
 
 function NP.config.GetNameplateFontSizes()

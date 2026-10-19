@@ -109,7 +109,7 @@ function NP.layout.RestorePlateDepthOrdering(plateData)
     if not plateData then return end
     local plate = plateData.plate
     local originalLevels = plateData._depthOriginalLevels
-    if plate and originalLevels and originalLevels[plate] ~= nil then
+    if plate and originalLevels and originalLevels[plate] ~= nil and not InCombatLockdown() then
         SetFrameLevelFully(plate, originalLevels[plate])
     end
     plateData._depthOriginalLevels = nil
@@ -334,7 +334,8 @@ function NP.layout.UpdateDepthOrdering(elapsed)
         if plateData._depthAppliedIndex == index
             and plateData._depthAppliedCfgRev == cfgRev
             and not plateData._depthDirty
-            and not drifted then
+            and not drifted
+            and not (plateData._depthPlatePending and not InCombatLockdown()) then
             -- Sync BGHframe when attached mid-life.
             if plate and plate.BGHframe and plate.BGHframe.SetFrameLevel then
                 SetDepthFrameLevel(plateData, plate.BGHframe, base + BGH_FRAME_OFFSET)
@@ -343,10 +344,16 @@ function NP.layout.UpdateDepthOrdering(elapsed)
             plateData._depthAppliedIndex = index
             plateData._depthAppliedCfgRev = cfgRev
             plateData._depthDirty = nil
-            if cfg.showClickbox == true and plate and plate.SetFrameLevel then
+            plateData._depthPlatePending = nil
+            local originalLevel = plateData._depthOriginalLevels and plateData._depthOriginalLevels[plate]
+            local wantPlateLevel = cfg.showClickbox == true and plate and plate.SetFrameLevel
+            -- The client plate is protected, so its own level change waits for combat to end.
+            if (wantPlateLevel or originalLevel ~= nil) and InCombatLockdown() then
+                plateData._depthPlatePending = true
+            elseif wantPlateLevel then
                 SetDepthFrameLevel(plateData, plate, base + 1)
-            elseif plateData._depthOriginalLevels and plateData._depthOriginalLevels[plate] ~= nil then
-                SetFrameLevelFully(plate, plateData._depthOriginalLevels[plate])
+            elseif originalLevel ~= nil then
+                SetFrameLevelFully(plate, originalLevel)
                 plateData._depthOriginalLevels[plate] = nil
             end
             if visualRoot and visualRoot.SetFrameLevel then
@@ -562,23 +569,45 @@ end
 
 -- Simple clamp (no retail stacking).
 -- Reapply every frame: recycled frames do not preserve clamp state.
--- Bottom inset is anchor-relative, not screen pixels (plates sit in extended WorldFrame).
+-- Keep the bottom inset constant: one derived from GetPoint each frame shook the pinned plate.
 local function ApplySimpleClamp(plateData)
     local plate = plateData.plate
-    if not plate or not plate.SetClampedToScreen or not plate.GetPoint then return end
+    if not plate or not plate.SetClampedToScreen then return end
 
     local want = PlateWantsClamp(plateData)
     plateData._clamped = want
 
     if want then
-        local width, height = plate:GetSize()
-        local _, _, _, _, y = plate:GetPoint(1)
-        y = y or 0
+        local width = plate:GetWidth()
         SetPlateClamp(plateData, plate, true,
-            0.5 * width, -0.5 * width, NP.module._clampTopInset or 0, height - y)
+            0.5 * width, -0.5 * width, NP.module._clampTopInset or 0, 0)
     else
         SetPlateClamp(plateData, plate, false, 0, 0, 0, 0)
     end
+end
+
+-- Plate heights from an anchor point up to the plate's top edge.
+local ANCHOR_TO_TOP = {
+    TOPLEFT = 0, TOP = 0, TOPRIGHT = 0, LEFT = 0.5, CENTER = 0.5, RIGHT = 0.5,
+    BOTTOMLEFT = 1, BOTTOM = 1, BOTTOMRIGHT = 1,
+}
+local FROM_SCREEN_BOTTOM = { BOTTOMLEFT = true, BOTTOM = true, BOTTOMRIGHT = true }
+
+-- Clamp rect bottom `lift` under the screen edge: the clamp pushes the plate up exactly that far.
+local function ApplyLiftClamp(plateData, lift, screenClamps)
+    local plate = plateData.plate
+    local point, _, relativePoint, _, y = plate:GetPoint(1)
+    local toTop = point and ANCHOR_TO_TOP[point]
+    -- y has to count up from the screen bottom; any other anchoring keeps the plain clamp.
+    if not y or not toTop or not FROM_SCREEN_BOTTOM[relativePoint] then
+        ApplySimpleClamp(plateData)
+        return
+    end
+    local width, height = plate:GetSize()
+    local top = y + height * toTop
+    local topInset = screenClamps and PlateWantsClamp(plateData) and (NP.module._clampTopInset or 0) or -height
+    plateData._clamped = true
+    SetPlateClamp(plateData, plate, true, 0.5 * width, -0.5 * width, topInset, height - top - lift)
 end
 
 local function ClearRetailStackingForPlate(plateData, data)
@@ -745,7 +774,16 @@ function NP.layout.UpdateStacking()
         return
     end
     NP.layout.ResetRetailStacking()
-    if NP.module._clampTargetEnabled or NP.module._clampBossEnabled then
+    local lift = NP.config.GetClickLift()
+    if lift > 0 then
+        local screenClamps = NP.module._clampTargetEnabled or NP.module._clampBossEnabled
+        for _, plateData in pairs(NP.module.plates) do
+            local plate = plateData.plate
+            if plate and plate.IsShown and plate:IsShown() then
+                ApplyLiftClamp(plateData, lift, screenClamps)
+            end
+        end
+    elseif NP.module._clampTargetEnabled or NP.module._clampBossEnabled then
         for _, plateData in pairs(NP.module.plates) do
             local plate = plateData.plate
             if plate and plate.IsShown and plate:IsShown() then
@@ -839,7 +877,7 @@ function NP.layout.ApplyNameplateFonts(plateData)
         local offY = cfg.castBarSpellNameOffsetY or 0
         fs:ClearAllPoints()
         local icon = cast.minaCastIcon
-        if NP.config.IsRetailSkin() and icon then
+        if NP.config.IsRetailSkin() and icon and not cfg.castBarModernIconLeft then
             -- Retail runs the spell name from the icon's right edge, under the bar.
             fs:SetJustifyH("LEFT")
             fs:SetPoint("LEFT", icon, "RIGHT", 2 + offX, offY)

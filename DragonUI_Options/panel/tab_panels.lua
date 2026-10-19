@@ -45,6 +45,7 @@ local subTabs = {
     { key = "loot",        label = LO["Loot Window"] },
     { key = "talents",     label = LO["Talents"] },
     { key = "spellbook",   label = LO["Spellbook"] },
+    { key = "professions", label = LO["Professions"] },
 }
 
 -- Search navigation sub-tab setter.
@@ -76,20 +77,28 @@ local function BuildCharacterSubTab(scroll)
         requiresReload = true,
     })
 
-    C:AddToggle(cpSection, {
-        label = LO["Class Portrait"],
-        desc = LO["Show your class icon in the portrait instead of your character's face."],
+    -- Keys sort in display order: the embedded dropdown lists them alphabetically.
+    C:AddDropdown(cpSection, {
+        label = LO["Portrait"],
+        values = {
+            character = LO["Character"],
+            class = LO["Class Icon"],
+            spec = LO["Specialization Icon"],
+        },
+        width = 200,
         getFunc = function()
-            return GetModuleField("characterpanel", "class_portrait") ~= false
+            local CP = addon.CharacterPanel
+            return CP and CP.PortraitStyle and CP.PortraitStyle() or "spec"
         end,
         setFunc = function(val)
-            EnsureModuleTable("characterpanel").class_portrait = val
+            local cfg = EnsureModuleTable("characterpanel")
+            cfg.portrait_style = val
+            cfg.class_portrait = nil
             if addon.CharacterPanel and addon.CharacterPanel.UpdatePortrait then
                 addon.CharacterPanel.UpdatePortrait()
             end
         end,
         disabled = function() return not IsEnabled("characterpanel") end,
-        requiresReload = false,
     })
 
     C:AddToggle(cpSection, {
@@ -240,6 +249,50 @@ local function BuildCharacterSubTab(scroll)
         disabled = function() return not IsEnabled("characterpanel") end,
         requiresReload = false,
     })
+
+    -- ====================================================================
+    -- EQUIPMENT SET PER SPEC (per character, so it lives in db.char)
+    -- ====================================================================
+    C:AddSpacer(scroll)
+    local specSection = C:AddSection(scroll, LO["Equipment Sets"])
+
+    C:AddDescription(specSection, LO["Equip a set automatically when you switch talent specialization. Saved per character."])
+
+    -- "" sorts first, so None leads the list.
+    local setValues = { [""] = LO["None"] }
+    for i = 1, (GetNumEquipmentSets and GetNumEquipmentSets() or 0) do
+        local name = GetEquipmentSetInfo(i)
+        if name then setValues[name] = name end
+    end
+
+    local function noDualSpec()
+        return (GetNumTalentGroups and GetNumTalentGroups(false, false) or 1) < 2
+    end
+
+    for group = 1, 2 do
+        C:AddDropdown(specSection, {
+            label = addon.GetTalentSpecName and addon.GetTalentSpecName(group)
+                or (group == 2 and _G.TALENT_SPEC_SECONDARY or _G.TALENT_SPEC_PRIMARY),
+            values = setValues,
+            getFunc = function()
+                local sets = addon.db.char.specEquipmentSets
+                local name = sets and sets[group]
+                return (name and setValues[name]) and name or ""
+            end,
+            setFunc = function(val)
+                local CP = addon.CharacterPanel
+                if CP and CP.AssignSpecSet then CP.AssignSpecSet(group, val ~= "" and val or nil) end
+            end,
+            -- A set serves one spec, so the other dropdown may have just lost it.
+            callback = function()
+                addon:After(0, function()
+                    if Panel.currentTab == "panels" then Panel:SelectTab("panels") end
+                end)
+            end,
+            disabled = noDualSpec,
+            width = 200,
+        })
+    end
 end
 
 -- ============================================================================
@@ -399,6 +452,24 @@ local function BuildWorldMapSubTab(scroll)
         requiresReload = false,
     })
 
+    -- Keys sort in display order: the embedded dropdown lists them alphabetically.
+    C:AddDropdown(mapSection, {
+        label = LO["Group Member Pins"],
+        desc = LO["How party and raid members show on the world map and the battlefield map. Class colors and class icons also color their names in the tooltip and add their health."],
+        values = {
+            blizzard = LO["Default (Blizzard)"],
+            color = LO["Class Colors"],
+            icon = LO["Class Icons"],
+        },
+        width = 200,
+        getFunc = function() return GetModuleField("worldmap", "groupPins") or "color" end,
+        setFunc = function(val)
+            EnsureModuleTable("worldmap").groupPins = val
+            if addon.RefreshWorldMapSystem then addon.RefreshWorldMapSystem() end
+        end,
+        disabled = function() return not IsEnabled("worldmap") end,
+    })
+
     C:AddToggle(mapSection, {
         label = LO["Fade Map While Moving"],
         desc = LO["Dim the map while you move, unless the cursor is over it."],
@@ -472,6 +543,19 @@ local function BuildLootSubTab(scroll)
         setFunc = function(val)
             EnsureModuleTable("loot_skin").animated_reflow = val
             if addon.LootSkinModule then addon.LootSkinModule:RefreshSettings() end
+        end,
+        disabled = function() return not IsEnabled("loot_skin") end,
+        requiresReload = false,
+    })
+
+    C:AddToggle(lootSection, {
+        label = LO["Auto-Hide Empty Loot"],
+        desc = LO["Close the loot window when there is nothing left to loot."],
+        getFunc = function()
+            return GetModuleField("loot_skin", "auto_hide_empty") == true
+        end,
+        setFunc = function(val)
+            EnsureModuleTable("loot_skin").auto_hide_empty = val
         end,
         disabled = function() return not IsEnabled("loot_skin") end,
         requiresReload = false,
@@ -619,6 +703,64 @@ local function BuildSpellbookSubTab(scroll)
 end
 
 -- ============================================================================
+-- PROFESSIONS
+-- ============================================================================
+local function BuildProfessionsSubTab(scroll)
+    local section = C:AddSection(scroll, LO["Professions"])
+    C:AddDescription(section, LO["Forever-style professions window with side tabs and an overview page."])
+
+    C:AddToggle(section, {
+        label = LO["Enable Professions"],
+        desc = LO["Use the Forever professions window instead of the stock one."],
+        getFunc = function() return IsEnabled("professions") end,
+        setFunc = function(val)
+            EnsureModuleTable("professions").enabled = val
+            Panel:SelectTab("panels")
+        end,
+        requiresReload = true,
+    })
+
+    C:AddSlider(section, {
+        label = LO["Professions Window Scale"],
+        desc = LO["Scales the whole professions window; the room it takes beside other panels follows its size."],
+        dbPath = "modules.professions.scale",
+        min = 0.6,
+        max = 1.2,
+        step = 0.05,
+        width = 200,
+        disabled = function() return not IsEnabled("professions") end,
+        callback = function(val)
+            if addon.RefreshProfessionsScale then addon.RefreshProfessionsScale(val) end
+        end,
+    })
+
+    C:AddSlider(section, {
+        label = LO["Side Tabs Scale"],
+        desc = LO["Scales only the profession tabs beside the window, on top of the window scale."],
+        dbPath = "modules.professions.tabScale",
+        min = 0.5,
+        max = 1,
+        step = 0.05,
+        width = 200,
+        disabled = function() return not IsEnabled("professions") end,
+        callback = function()
+            if addon.RefreshProfessionsTabScale then addon.RefreshProfessionsTabScale() end
+        end,
+    })
+
+    -- Same setting as the Micro Menu tab's toggle.
+    C:AddToggle(section, {
+        label = LO["Professions Micro Button"],
+        desc = LO["Show the Professions button in the micro menu. It opens the professions overview."],
+        dbPath = "modules.professions.micro_button",
+        disabled = function() return not IsEnabled("professions") end,
+        callback = function()
+            if addon.RefreshProfessionsMicroButton then addon.RefreshProfessionsMicroButton(true) end
+        end,
+    })
+end
+
+-- ============================================================================
 -- SUB-TAB DISPATCH
 -- ============================================================================
 
@@ -629,6 +771,7 @@ local subTabBuilders = {
     loot        = BuildLootSubTab,
     talents     = BuildTalentsSubTab,
     spellbook   = BuildSpellbookSubTab,
+    professions = BuildProfessionsSubTab,
 }
 
 -- ============================================================================

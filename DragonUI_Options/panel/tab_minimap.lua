@@ -47,7 +47,9 @@ local function GetMinimapSettingsTable()
 end
 
 local function GetRecommendedAnimatedBorderScale(settings)
-    if settings and settings.animated_border_hide_dragonui_border == true then
+    -- Square presets frame the map at their own size; only round ones tuck inside the ring.
+    local square = settings and (settings.style == "dragonui_square" or settings.style == "forever_square")
+    if settings and (settings.animated_border_hide_dragonui_border == true or square) then
         return AUTO_SCALE_BORDER_HIDDEN
     end
     return AUTO_SCALE_BORDER_VISIBLE
@@ -89,6 +91,14 @@ local function GetAnimatedBorderPresets()
     }
 end
 
+-- Hybrid mode leaves the ring to SexyMap, so the Forever style is off there.
+local function IsForeverMinimap()
+    local modules = addon.db and addon.db.profile and addon.db.profile.modules
+    local mode = modules and modules.minimap and modules.minimap.sexymap_mode
+    local style = C:GetDBValue("minimap.style")
+    return (style == "forever" or style == "forever_square") and mode ~= "hybrid"
+end
+
 local function IsCollectorEnabled()
     local enabled = C:GetDBValue("minimap.collector_enabled")
     if enabled == nil then
@@ -102,24 +112,7 @@ local function SetSectionVisualState(section, enabled)
         return
     end
 
-    local border = section.content and section.content:GetParent()
-    if border and border.SetBackdropColor and border.SetBackdropBorderColor then
-        if enabled then
-            border:SetBackdropColor(0.08, 0.08, 0.10, 0.6)
-            border:SetBackdropBorderColor(0.20, 0.20, 0.22, 0.8)
-        else
-            border:SetBackdropColor(0.06, 0.06, 0.07, 0.45)
-            border:SetBackdropBorderColor(0.14, 0.14, 0.16, 0.6)
-        end
-    end
-
-    if section.titletext then
-        if enabled then
-            section.titletext:SetTextColor(unpack(C.Theme.textGold))
-        else
-            section.titletext:SetTextColor(unpack(C.Theme.textDim))
-        end
-    end
+    C.SetSectionState(section, enabled)
 end
 
 local function BuildMinimapTab(scroll)
@@ -128,6 +121,13 @@ local function BuildMinimapTab(scroll)
     -- ====================================================================
     local collector = C:AddSection(scroll, LO["Minimap Buttons Collector"])
     local collectorWidgets = {}
+    local collectorStyleDropdown
+
+    -- Forever has no arrow collector: the dropdown shows Circle and locks while it is on.
+    local function GetCollectorStyle()
+        if IsForeverMinimap() then return "dragonui" end
+        return C:GetDBValue("minimap.collector_style") or "dragonui"
+    end
 
     local function UpdateCollectorSectionState()
         if Panel.indexing then return end
@@ -136,6 +136,10 @@ local function BuildMinimapTab(scroll)
             if widget and widget.SetDisabled then
                 widget:SetDisabled(not enabled)
             end
+        end
+        if collectorStyleDropdown then
+            collectorStyleDropdown:SetValue(GetCollectorStyle())
+            collectorStyleDropdown:SetDisabled(not enabled or IsForeverMinimap())
         end
         SetSectionVisualState(collector, enabled)
     end
@@ -149,7 +153,7 @@ local function BuildMinimapTab(scroll)
         end,
     })
 
-    collectorWidgets[#collectorWidgets + 1] = C:AddDropdown(collector, {
+    collectorStyleDropdown = C:AddDropdown(collector, {
         label = LO["Style"],
         values = {
             dragonui = LO["Circle"],
@@ -157,15 +161,74 @@ local function BuildMinimapTab(scroll)
         },
         width = 220,
         dbPath = "minimap.collector_style",
+        getFunc = GetCollectorStyle,
         callback = RefreshMinimap,
     })
 
     UpdateCollectorSectionState()
 
+    local UpdateAnimatedBorderSectionState -- forward declare
+
     -- ====================================================================
     -- BASIC SETTINGS
     -- ====================================================================
     local basic = C:AddSection(scroll, LO["Basic Settings"])
+    local squareBorderDropdown, topArrowToggle, roundedToggle
+
+    local function UpdateSquareBorderState()
+        if Panel.indexing or not squareBorderDropdown or not topArrowToggle or not roundedToggle then return end
+        local foreverSquare = IsForeverMinimap() and C:GetDBValue("minimap.style") == "forever_square"
+        local thin = foreverSquare and C:GetDBValue("minimap.forever_square_border") == "thin"
+        squareBorderDropdown:SetDisabled(not foreverSquare)
+        topArrowToggle:SetDisabled(not foreverSquare or thin)
+        roundedToggle:SetDisabled(not foreverSquare or thin)
+    end
+
+    C:AddDropdown(basic, {
+        label = LO["Style"],
+        dbPath = "minimap.style",
+        values = {
+            dragonui = LO["DragonUI"],
+            dragonui_square = LO["DragonUI Square"],
+            forever = LO["Forever"],
+            forever_square = LO["Forever Square"],
+        },
+        callback = function()
+            UpdateCollectorSectionState()
+            UpdateSquareBorderState()
+            if UpdateAnimatedBorderSectionState then
+                UpdateAnimatedBorderSectionState()
+            end
+            RefreshMinimap()
+            RefreshAnimatedBorder()
+        end,
+    })
+
+    squareBorderDropdown = C:AddDropdown(basic, {
+        label = LO["Square Border"],
+        dbPath = "minimap.forever_square_border",
+        values = {
+            frame = LO["Forever Frame"],
+            thin = LO["Thin Line"],
+        },
+        callback = function()
+            UpdateSquareBorderState()
+            RefreshMinimap()
+        end,
+    })
+
+    topArrowToggle = C:AddToggle(basic, {
+        label = LO["Top Arrow"],
+        dbPath = "minimap.square_top_arrow",
+        callback = RefreshMinimap,
+    })
+
+    roundedToggle = C:AddToggle(basic, {
+        label = LO["Rounded Corners"],
+        dbPath = "minimap.forever_square_rounded",
+        callback = RefreshMinimap,
+    })
+    UpdateSquareBorderState()
 
     C:AddSlider(basic, {
         label = LO["Scale"],
@@ -214,10 +277,34 @@ local function BuildMinimapTab(scroll)
         callback = RefreshMinimap,
     })
 
+    C:AddToggle(basic, {
+        label = LO["Show Ping Sender"],
+        desc = LO["Show who pinged the minimap, in their class color."],
+        dbPath = "minimap.ping_sender",
+    })
+
     C:AddSlider(basic, {
         label = LO["Player Arrow Size"],
         dbPath = "minimap.player_arrow_size",
         min = 8, max = 50, step = 1,
+        width = 200,
+        callback = RefreshMinimap,
+    })
+
+    local farm = C:AddSection(scroll, LO["Farm Mode"])
+    C:AddDescription(farm, LO["Bigger minimap with the surrounding clutter hidden."])
+
+    C:AddToggle(farm, {
+        label = LO["Enable"],
+        dbPath = "minimap.farm_mode_enabled",
+        callback = RefreshMinimap,
+    })
+
+    C:AddSlider(farm, {
+        label = LO["Extra scale"],
+        desc = LO["Extra scale applied on top of the minimap scale."],
+        dbPath = "minimap.farm_mode_scale",
+        min = 1.0, max = 2.0, step = 0.05,
         width = 200,
         callback = RefreshMinimap,
     })
@@ -289,18 +376,34 @@ local function BuildMinimapTab(scroll)
     C:AddDescription(animatedBorder, LO["Border presets from SexyMap by funkydude, used with permission."])
     local animatedBorderWidgets = {}
     local animatedBorderScaleSlider
+    local presetDropdown
+
+    -- Round and square styles offer different presets, so each keeps its own choice.
+    local function GetPresetPath()
+        local style = C:GetDBValue("minimap.style")
+        local square = style == "dragonui_square" or style == "forever_square"
+        return square and "minimap.animated_border_square_preset" or "minimap.animated_border_preset"
+    end
 
     local function IsAnimatedBorderEnabled()
         return C:GetDBValue("minimap.animated_border_enabled") == true
     end
 
-    local function UpdateAnimatedBorderSectionState()
+    UpdateAnimatedBorderSectionState = function()
         if Panel.indexing then return end
         local enabled = IsAnimatedBorderEnabled()
         for _, widget in ipairs(animatedBorderWidgets) do
             if widget and widget.SetDisabled then
                 widget:SetDisabled(not enabled)
             end
+        end
+        if presetDropdown and presetDropdown.SetList then
+            presetDropdown:SetList(GetAnimatedBorderPresets())
+            presetDropdown:SetValue(C:GetDBValue(GetPresetPath()))
+        end
+        local _, recommendedScale = ApplyAnimatedBorderAutoScaleIfNeeded()
+        if recommendedScale and animatedBorderScaleSlider and animatedBorderScaleSlider.SetValue then
+            animatedBorderScaleSlider:SetValue(recommendedScale)
         end
         SetSectionVisualState(animatedBorder, enabled)
     end
@@ -325,13 +428,16 @@ local function BuildMinimapTab(scroll)
         end,
     })
 
-    animatedBorderWidgets[#animatedBorderWidgets + 1] = C:AddDropdown(animatedBorder, {
+    presetDropdown = C:AddDropdown(animatedBorder, {
         label = LO["Preset"],
         values = GetAnimatedBorderPresets(),
         width = 260,
         dbPath = "minimap.animated_border_preset",
+        getFunc = function() return C:GetDBValue(GetPresetPath()) end,
+        setFunc = function(value) C:SetDBValue(GetPresetPath(), value) end,
         callback = RefreshAnimatedBorder,
     })
+    animatedBorderWidgets[#animatedBorderWidgets + 1] = presetDropdown
 
     animatedBorderWidgets[#animatedBorderWidgets + 1] = C:AddToggle(animatedBorder, {
         label = LO["Animated Effects"],

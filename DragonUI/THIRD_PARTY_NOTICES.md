@@ -4,9 +4,9 @@ DragonUI's own code is released under the MIT License (`LICENSE` at the reposito
 `LICENSE.txt` inside the `DragonUI` addon folder). This file lists everything shipped in the two
 addon folders that is not DragonUI's own work, or that is under other terms.
 
-Paths are relative to the repository root. Users install only the `DragonUI/` and
-`DragonUI_Options/` folders, so this file and the `LICENSES/` folder are also shipped inside the
-addon: `DragonUI/THIRD_PARTY_NOTICES.md` and `DragonUI/LICENSES/` are copies of the root files, and
+Paths are relative to the repository root, except `LICENSES/`, which is the folder next to this
+file (`DragonUI/LICENSES/`). Users install only the `DragonUI/` and `DragonUI_Options/` folders, so
+this file and `LICENSES/` live inside `DragonUI/` to ship with the addon, and
 `DragonUI_Options/LICENSES/` holds the texts that apply to that folder.
 
 ## Blizzard Entertainment artwork and game data
@@ -25,7 +25,7 @@ were obtained via. They are credited as conduits, not as the authors of the art.
 
 | Folder under `DragonUI/Textures/` | Obtained via |
 |---|---|
-| `ActionBars/` | pretty_actionbar (s0h2x); some sheets carry his small repacking edits, which leave them Blizzard's art |
+| `ActionBars/` | pretty_actionbar (s0h2x); some sheets carry his small repacking edits, which leave them Blizzard's art; `uiactionbar2x_forever` cut from WoW Forever's end-cap sheet (`uiactionbar2xc60`) |
 | `Bags/` | DragonflightUI (`bagborder2`, `bagslotCutout`, `bagsitemslot2x`, `bagsitembankslot2x`), pretty_actionbar (`bagslots2x`, `bagslots2key`); `INV_Misc_Bag_08_round` is the retail bag icon, cropped round |
 | `Castbar/`, `Editmode/`, `Reputation/` | DragonflightUI |
 | `CharacterPanel/` | DragonUI_NewEra; `resistanceicons.tga` is cut from 3.3.5a client art |
@@ -33,23 +33,24 @@ were obtained via. They are credited as conduits, not as the authors of the art.
 | `Coins/` | DragonflightUI (`commoncoinbox`, `commoncurrencybox`); the coins are retail art |
 | `Collections/` | see [Collections artwork](#collections-artwork) |
 | `Merchant/` | DragonUI_NewEra; `emptyslot.blp` is the 3.3.5a client's own |
-| `Micromenu/` | DragonflightUI, pretty_actionbar |
-| `Minimap/` | pretty_minimap (s0h2x), RetailUI (`Calendar`, `GuildBanner`, `MinimapBorder`); `collector_toggle.tga` is cropped from the retail minimap border in `UI/Minimap.blp` |
+| `Micromenu/` | DragonflightUI, pretty_actionbar; `dragonbreath.tga` is the dragon head of `UnitFrames/Forever/uiunitframeboss2x` (WoW Forever's elite dragon sheet) with its jaw re-posed, plus two generated fire sprites |
+| `Minimap/` | pretty_minimap (s0h2x), RetailUI (`Calendar`, `GuildBanner`, `MinimapBorder`); `collector_toggle.tga` is cropped from the retail minimap border in `UI/Minimap.blp`; `forever_*` cut from WoW Forever's minimap sheets (`uiminimap2xc60`, `uiminimapmaskgeneralc60`) |
 | `Nameplates/Retail/` | see [Retail nameplate artwork](#retail-nameplate-artwork) |
 | `Nameplates/Totem/` | 3.3.5a spell icons with a new frame |
 | `NewLevelUp/` | retail level-up art |
+| `Professions/` | WoW Forever's profession art: the 2x card and banner sheets (`professioncardbackground*2xc60`, `professioncardbackgroundgeneric2xc60`), `professiontrainerbackgroundc60`, `professionoverviewbackgroundc60`, `professionoverview2xc60`, `commonsidetabc60` (its border also cut along `commonsidetabmaskc60`), `commonbuttonlist2xc60`, `commonbuttontertiary2xc60`, `commoninsideframe2xc60`, the `common-icon-chatlink` cell of `commonicons2x`, the portrait corner of `uiframemetal2xc60`, the skill bar fills and flares of `professionsfx*` (their flipbooks re-encoded as add/multiply overlays on the resting frame), the `BattleBar-SwapPetShadow` cell of `petbattlehudatlas`, the `auctionhouse-ui-filter-redx`, `auctionhouse-icon-favorite` and `auctionhouse-itemicon-border-*` cells of `auctionhouse`, the `inv_sidetab_professions_c60` icon as `OverviewIcon`, and the mainline `professions` sheet that client ships; repacked (the cards share one parchment, so each profession keeps only its drawing); the page, card and banner sheets are stored as DXT5 BLPs brightened for encoding and drawn back at their original brightness, the widget and fill sheets as RLE TGAs, the bar animations as DXT1 BLPs. The Jewelcrafting and Inscription drawings are re-composed from the retail recipe backgrounds in that client, laid out like WoW Forever's Tailoring art; the Runeforging drawing is the Death Knight emblem of `artifactuideathknightfrost` drawn as light strokes. `MicroButton` holds the professions cells of the retail micro menu sheet (`uimicromenu2x`) that client ships, plus gold versions recoloured from them with the palette and plate of DragonUI's gold micro menu icons |
 | `Quest/` | New Era by Ashgaroth (retail quest-giver icons); `repeatablequesticon` is retail's `DailyActiveQuestIcon` |
 | `Spellbook/` | retail spellbook art contributed by PentSec (pull request #485); cropped to the pieces the book draws and re-encoded (`spellbook-ribbon` kept uncompressed) |
 | `Talents/` | DragonUI_NewEra and New Era by Ashgaroth; `Artifact/` holds Legion-era retail art |
 | `UI/` | RetailUI atlases (`UnitFrame`, `MicroMenu`, `Minimap`, `CastingBar`, `QuestTracker`, `BagSlotsKey`, `CollapseButton`); DragonflightUI and DragonUI_NewEra retail frame chrome; a few 3.3.5a client files |
-| `UnitFrames/` | DragonflightUI; `Layers/` via UnitFrameLayers (RomanSpector); `Player/ClassOverlayDeathKnightRunes`, `Player/LFGRoleIcons`, `Player/PlayerRestFlipbook` and `uiunitframeboss2x` via RetailUI |
+| `UnitFrames/` | DragonflightUI (`HD/` is its `Unitframe2x` art, re-cut into BACKGROUND/BORDER pieces; `HD/Target-NameStrip` is re-cut from `Target/UIUnitFrame2x_PTR`); `Layers/` via UnitFrameLayers (RomanSpector); `Player/ClassOverlayDeathKnightRunes`, `Player/LFGRoleIcons`, `Player/PlayerRestFlipbook` and `uiunitframeboss2x` via RetailUI; `pvpforever` cut from WoW Forever's unit frame sheet (`uiunitframe2xc60`), and `Forever/` re-cut from that same sheet into BACKGROUND/BORDER pieces plus its level circle and skull (`Level`); `Forever/Party-*` re-cut the same way from WoW Forever's party sheet (`partyc60`, 1x, upscaled); `HD/Party-InCombat` is the retail unit frame sheet's (`uiunitframe2x`) ToT aggro glow; `Forever/uiunitframeboss2x` is WoW Forever's elite dragon sheet (`uiunitframebossc602x`), re-encoded; `Forever/Player-Status`, `Forever/Target-InCombat` and `Forever/Target-Type` (tinted) are DragonflightUI's `Unitframe2x` art, `Forever/Player-InCombat` and `Forever/Player-CombatIcon` are cut from the retail unit frame sheet (`uiunitframe2x`) that WoW Forever ships; `PvP/` is that sheet's PvP art, laid out like Blizzard's `UI-PVP-*` and `UI-Group-PVP-*` icons; `Icons/StatusIcons` gathers that sheet's leader, guide and group-tab caps, the group tab's middle (`groupindicatormid-2x`), the retail tiny role icons (`roleicon-tiny-sheet`) and WoW Forever's group finder leader and role icons (`groupfinder-c60-2x`) |
 | `WorldMap/` | see [World map artwork](#world-map-artwork) |
 | `XP/` | DragonflightUI; `uiexperiencebar.blp` via pretty_actionbar / RetailUI |
 
 Data tables generated from the World of Warcraft client's database (DBC) files are game data
 © Blizzard Entertainment and are not covered by DragonUI's MIT License:
 `DragonUI/modules/worldmap/fogdata.lua`, `entrancedata.lua`, `flightpointdata.lua`,
-`graveyarddata.lua`, and `DragonUI/data/aura_durations.lua`, `companion_traits.lua`. The inn
+`graveyarddata.lua`, and `DragonUI/data/aura_durations.lua`, `companion_traits.lua`, `mount_speeds.lua`. The inn
 positions in `DragonUI/modules/worldmap/inndata.lua` are derived from AzerothCore's world-database
 spawn data together with the client's map data, and the class trainer lists in
 `DragonUI/modules/spellbook/trainerdata.lua` from AzerothCore's trainer tables together with the

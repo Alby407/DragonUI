@@ -74,19 +74,30 @@ local function UpdatePartyAnchorSize()
     local settings = addon.db and addon.db.profile and addon.db.profile.unitframe and addon.db.profile.unitframe.party
     local orientation = settings and settings.orientation or 'vertical'
     local numMembers = MAX_PARTY_MEMBERS -- 4
-    
+    local scale = (settings and tonumber(settings.scale)) or 1
+
     if orientation == 'horizontal' then
         local padding = (settings and tonumber(settings.padding_horizontal)) or 50
         local frameWidth = 120
         local frameHeight = 50
         local totalWidth = numMembers * frameWidth + (numMembers - 1) * padding
-        PartyFrames.anchor:SetSize(totalWidth, frameHeight)
+        PartyFrames.anchor:SetSize(totalWidth * scale, frameHeight * scale)
     else
         local padding = (settings and tonumber(settings.padding_vertical)) or 30
         local frameWidth = 130
         local frameHeight = 50
         local totalHeight = numMembers * frameHeight + (numMembers - 1) * padding
-        PartyFrames.anchor:SetSize(frameWidth, totalHeight)
+        PartyFrames.anchor:SetSize(frameWidth * scale, totalHeight * scale)
+    end
+end
+
+-- A row when horizontal, a column when vertical; shared by styling, the editor and the update hook.
+local function PlacePartyMemberFrame(frame, index, step, orientation)
+    frame:ClearAllPoints()
+    if orientation == 'horizontal' then
+        frame:SetPoint("TOPLEFT", PartyFrames.anchor, "TOPLEFT", (index - 1) * step, 0)
+    else
+        frame:SetPoint("TOPLEFT", PartyFrames.anchor, "TOPLEFT", 0, (index - 1) * -step)
     end
 end
 
@@ -239,23 +250,7 @@ end
 function PartyFrames:UpdateWidgets()
     ApplyWidgetPosition()
     UpdatePartyAnchorSize() -- Update anchor size based on orientation
-    if not InCombatLockdown() then
-        local step = GetPartyStep()
-        local orientation = GetOrientation()
-        for i = 1, MAX_PARTY_MEMBERS do
-            local frame = _G['PartyMemberFrame' .. i]
-            if frame and PartyFrames.anchor then
-                frame:ClearAllPoints()
-                if orientation == 'horizontal' then
-                    local xOffset = (i - 1) * step
-                    frame:SetPoint("TOPLEFT", PartyFrames.anchor, "TOPLEFT", xOffset, 0)
-                else
-                    local yOffset = (i - 1) * -step
-                    frame:SetPoint("TOPLEFT", PartyFrames.anchor, "TOPLEFT", 0, yOffset)
-                end
-            end
-        end
-    end
+    PartyFrames:LayoutFrames()
 end
 
 -- Function to check if party frames should be visible
@@ -300,6 +295,7 @@ end
 local function ShowPartyFramesTest()
     -- Update anchor size for editor mode
     UpdatePartyAnchorSize()
+    PartyFrames:LayoutFrames()
     -- Raise overlay strata so it appears ABOVE fake party frames
     if PartyFrames.anchor then
         PartyFrames.anchor:SetFrameStrata('FULLSCREEN')
@@ -405,19 +401,20 @@ local function GetOrientation()
     return settings and settings.orientation or 'vertical'
 end
 
+-- A method because UpdateWidgets and the editor test sit above the locals this reads.
+function PartyFrames:LayoutFrames()
+    if InCombatLockdown() or not self.anchor then return end
 
--- Get class color helper
--- Get texture coordinates for party frame elements
-local function GetPartyCoords(type)
-    if type == "background" then
-        return 0.480469, 0.949219, 0.222656, 0.414062
-    elseif type == "flash" then
-        return 0.480469, 0.925781, 0.453125, 0.636719
-    elseif type == "status" then
-        return 0.00390625, 0.472656, 0.453125, 0.644531
+    local step = GetPartyStep()
+    local orientation = GetOrientation()
+    for i = 1, MAX_PARTY_MEMBERS do
+        local frame = _G['PartyMemberFrame' .. i]
+        if frame then
+            PlacePartyMemberFrame(frame, i, step, orientation)
+        end
     end
-    return 0, 1, 0, 1
 end
+
 
 -- Power bar texture resolver (delegates to shared core)
 local function GetPowerBarTexture(unit)
@@ -527,6 +524,108 @@ end
 -- DYNAMIC CLIPPING SYSTEM
 -- ===============================================================
 
+-- Bar geometry from the frame style (UF.SKINS.<style>.party.bars), TOPLEFT on the party frame.
+local function PlacePartyBar(bar, frame, key)
+    local b = UF.GetFrameSkin().party.bars[key]
+    bar:SetSize(b.w, b.h)
+    bar:ClearAllPoints()
+    bar:SetPoint("TOPLEFT", frame, "TOPLEFT", b.x, b.y)
+end
+
+local function PlacePartyIcon(icon, frame, spot)
+    icon:SetSize(spot.w, spot.h)
+    icon:ClearAllPoints()
+    icon:SetPoint("TOPLEFT", frame, "TOPLEFT", spot.x, spot.y)
+end
+
+-- Blizzard's PartyMemberFrame_UpdateAssignedRoles sets PORTRAITROLES texcoords; this puts our sheet back after it.
+local function ApplyPartyRole(frame)
+    local icon = frame and _G[frame:GetName() .. 'RoleIcon']
+    if not icon then return end
+    local isTank, isHealer, isDamage = UnitGroupRolesAssigned("party" .. frame:GetID())
+    local role = (isTank and "TANK") or (isHealer and "HEALER") or (isDamage and "DAMAGER")
+    PlacePartyIcon(icon, frame, UF.PARTY_ICONS.role)
+    if role then
+        icon:SetTexture(UF.STATUS_ICONS.file)
+        icon:SetTexCoord(unpack(UF.STATUS_ICONS.roles[UF.GetStatusIconStyle()][role]))
+    end
+end
+
+-- Crown, guide, master looter and role at retail's spots, in the frame style's art.
+local function ApplyPartyIcons(frame)
+    local name = frame:GetName()
+    local style = UF.GetStatusIconStyle()
+    local leader = _G[name .. 'LeaderIcon']
+    if leader then
+        PlacePartyIcon(leader, frame, UF.PARTY_ICONS[style == "forever" and "foreverLeader" or "leader"])
+        leader:SetTexture(UF.STATUS_ICONS.file)
+        leader:SetTexCoord(unpack(UF.STATUS_ICONS.leader[style]))
+    end
+    local guide = _G[name .. 'GuideIcon']
+    if guide then
+        PlacePartyIcon(guide, frame, UF.PARTY_ICONS.leader)
+        guide:SetTexture(UF.STATUS_ICONS.file)
+        guide:SetTexCoord(unpack(UF.STATUS_ICONS.guide))
+    end
+    local master = _G[name .. 'MasterIcon']
+    if master then
+        PlacePartyIcon(master, frame, UF.PARTY_ICONS.master)
+        master:SetTexture(UF.STATUS_ICONS.file)
+        master:SetTexCoord(unpack(UF.STATUS_ICONS.master[style]))
+    end
+    ApplyPartyRole(frame)
+end
+
+-- Runs after PartyMemberFrame_UpdatePvPStatus, the only code that shows the icon.
+local function ApplyPartyPvP(frame)
+    local id = frame:GetID()
+    local icon = _G["PartyMemberFrame" .. id .. "PVPIcon"]
+    if not icon then return end
+    local kind = UF.GetPvPKind("party" .. id)
+    UF.ApplyClassicPvPTexture(icon, kind, true)
+    local container = frame.DragonUI_IconContainer
+    local badge = frame.DragonUI_PvPBadge
+    local onBadge = false
+    if kind and container and UF.GetPvPIconStyle(UF.GetConfig("party")) == "forever" then
+        if not badge then
+            badge = UF.CreatePvPBadge(container, "DragonUI_Party" .. id .. "PvPCircle")
+            frame.DragonUI_PvPBadge = badge
+        end
+        local spot = UF.PARTY_PVP_BADGE
+        badge:ClearAllPoints()
+        badge:SetPoint("CENTER", icon, "CENTER", spot.x, spot.y)
+        onBadge = UF.ShowPvPBadge(badge, kind, spot.scale)
+    elseif badge then
+        badge:Hide()
+    end
+    -- Alpha, not Hide: Blizzard owns the icon's Show/Hide.
+    icon:SetAlpha(onBadge and 0 or 1)
+end
+
+-- Art and bars for the current frame style; read at apply time, so a style switch is a refresh.
+local function ApplyPartySkin(frame)
+    local skin = UF.GetFrameSkin().party
+    if frame.DragonUI_Background then
+        UF.ApplySkinPiece(frame.DragonUI_Background, skin.background, "TOPLEFT", frame, "TOPLEFT", 0, 0)
+    end
+    local border = frame.DragonUI_BorderFrame and frame.DragonUI_BorderFrame.texture
+    if border then
+        UF.ApplySkinPiece(border, skin.border, "TOPLEFT", frame, "TOPLEFT", 0, 0)
+    end
+    if frame.DragonUI_HealthBar then
+        PlacePartyBar(frame.DragonUI_HealthBar, frame, "health")
+    end
+    if frame.DragonUI_ManaBar then
+        PlacePartyBar(frame.DragonUI_ManaBar, frame, "mana")
+    end
+    local flash = _G[frame:GetName() .. 'Flash']
+    if flash then
+        UF.ApplySkinPiece(flash, skin.flash, "TOPLEFT", frame, "TOPLEFT", 0, 0)
+    end
+    ApplyPartyIcons(frame)
+    ApplyPartyPvP(frame)
+end
+
 -- Create our own health StatusBar overlaid on Blizzard's native one. We never touch
 -- the native bar (that taints it and breaks its in-combat/vehicle Show/Hide); instead
 -- we read its value via the SetValue hook and mirror it onto our own bar.
@@ -541,9 +640,8 @@ local function EnsureDragonHealthBar(frame)
     end
 
     local db = CreateFrame("StatusBar", nil, frame)
-    -- Good custom geometry (native bar is hidden below via SetAlpha, see test below).
-    db:SetSize(71, 10)
-    db:SetPoint('TOPLEFT', frame, 'TOPLEFT', 44, -19)
+    -- Geometry from the frame style (native bar is hidden below via SetAlpha, see test below).
+    PlacePartyBar(db, frame, "health")
     db:SetFrameLevel(native:GetFrameLevel() + 1)
     db:SetStatusBarTexture(TEXTURES.healthBar)
     db:SetStatusBarColor(1, 1, 1, 1)
@@ -635,8 +733,7 @@ local function EnsureDragonManaBar(frame)
     end
 
     local db = CreateFrame("StatusBar", nil, frame)
-    db:SetSize(74, 6.5)
-    db:SetPoint('TOPLEFT', frame, 'TOPLEFT', 41, -30.5)
+    PlacePartyBar(db, frame, "mana")
     db:SetFrameLevel(native:GetFrameLevel() + 1)
     local initTex = GetPowerBarTexture("party" .. frame:GetID())
     db:SetStatusBarTexture(initTex)
@@ -855,10 +952,11 @@ local function UpdatePartyBarText(kind, statusBar, forceShow)
     local frameIndex = frame:GetName():match("PartyMemberFrame(%d+)")
     if not frameIndex then return end
 
-    local partyUnit = "party" .. frameIndex
+    local TextSystem = addon.TextSystem
+    local partyUnit, fake = TextSystem.GetPreviewUnit("party" .. frameIndex)
     if not UnitExists(partyUnit) then return end
 
-    if not UnitIsConnected(partyUnit) then
+    if not fake and not UnitIsConnected(partyUnit) then
         HidePartyBarText(frame, spec)
         return
     end
@@ -888,7 +986,7 @@ local function UpdatePartyBarText(kind, statusBar, forceShow)
 
     local shouldShow = false
 
-    if forceShow or isHovering then
+    if forceShow or isHovering or TextSystem.IsPreviewing("party") then
         shouldShow = true
     elseif settings and settings[spec.alwaysKey] then
         shouldShow = true
@@ -900,6 +998,7 @@ local function UpdatePartyBarText(kind, statusBar, forceShow)
     end
 
     local current, max = spec.GetValues(partyUnit)
+    if fake then current, max = TextSystem.ScalePreviewValues(kind, current, max) end
 
     if current and max and max > 0 then
         local textFormat = settings and settings.textFormat or "formatted"
@@ -937,6 +1036,20 @@ end
 UpdateManaText = function(statusBar, forceShow)
     UpdatePartyBarText("mana", statusBar, forceShow)
 end
+
+-- The editor's fake members have no unit events, so format changes repaint their texts from here.
+local function RefreshPartyPreviewTexts()
+    for i = 1, MAX_PARTY_MEMBERS do
+        local frame = _G['PartyMemberFrame' .. i]
+        if frame and frame:IsShown() then
+            local healthBar = frame.DragonUI_HealthBar or _G[frame:GetName() .. 'HealthBar']
+            local manaBar = frame.DragonUI_ManaBar or _G[frame:GetName() .. 'ManaBar']
+            if healthBar then UpdateHealthText(healthBar, false) end
+            if manaBar then UpdateManaText(manaBar, false) end
+        end
+    end
+end
+addon.TextSystem.RegisterPreviewUpdater("party", RefreshPartyPreviewTexts)
 
 -- Create invisible hover frames for independent health/mana text display
 local function CreateHoverFrames(frame, frameIndex)
@@ -1168,14 +1281,7 @@ local function StylePartyFrames()
                 frame:SetScale(settings.scale or 1)
                 frame:SetFrameStrata('BACKGROUND')
                 frame:SetFrameLevel(1)
-                frame:ClearAllPoints()
-                if orientation == 'horizontal' then
-                    local xOffset = (i - 1) * step
-                    frame:SetPoint("TOPLEFT", PartyFrames.anchor, "TOPLEFT", xOffset, 0)
-                else
-                    local yOffset = (i - 1) * -step
-                    frame:SetPoint("TOPLEFT", PartyFrames.anchor, "TOPLEFT", 0, yOffset)
-                end
+                PlacePartyMemberFrame(frame, i, step, orientation)
             end
 
             -- Hide background (and permanently prevent Blizzard's "Party/Arena Background" CVar from showing it)
@@ -1254,42 +1360,20 @@ local function StylePartyFrames()
                 end
             end
 
-            -- LEADER ICON STYLING
-            local leaderIcon = _G[frame:GetName() .. 'LeaderIcon']
-            if leaderIcon then -- Removed and not InCombatLockdown()
-                leaderIcon:ClearAllPoints()
-                leaderIcon:SetPoint('TOPLEFT', 42, 9) -- Custom position
-                leaderIcon:SetSize(16, 16) -- Custom size (optional)
-            end
-
-            -- Master looter icon styling
-            local masterLooterIcon = _G[frame:GetName() .. 'MasterIcon']
-            if masterLooterIcon then -- No combat restriction
-                masterLooterIcon:ClearAllPoints()
-                masterLooterIcon:SetPoint('TOPLEFT', 58, 11) -- Position next to leader icon
-                masterLooterIcon:SetSize(16, 16) -- Custom size
-
-            end
+            ApplyPartyIcons(frame)
 
             -- Flash setup
             local flash = _G[frame:GetName() .. 'Flash']
             if flash then
-                flash:SetSize(114, 47)
-                flash:SetTexture(TEXTURES.frame)
-                flash:SetTexCoord(GetPartyCoords("flash"))
-                flash:SetPoint('TOPLEFT', 2, -2)
+                UF.ApplySkinPiece(flash, UF.GetFrameSkin().party.flash, "TOPLEFT", frame, "TOPLEFT", 0, 0)
                 flash:SetVertexColor(1, 0, 0, 1)
                 flash:SetDrawLayer('OVERLAY', 1)
             end
 
             -- Create background and mark as styled
             if not frame.DragonUIStyled then
-                -- Background (behind everything)
-                local background = frame:CreateTexture(nil, 'BACKGROUND', nil, 0)
-                background:SetTexture(TEXTURES.frame)
-                background:SetTexCoord(GetPartyCoords("background"))
-                background:SetSize(120, 49)
-                background:SetPoint('TOPLEFT', 1, -2)
+                -- Background (behind everything); art and spot come from ApplyPartySkin
+                frame.DragonUI_Background = frame:CreateTexture(nil, 'BACKGROUND', nil, 0)
 
                 -- Create border as a separate FRAME (not texture) to appear above bars
                 if not frame.DragonUI_BorderFrame then
@@ -1299,13 +1383,10 @@ local function StylePartyFrames()
                     
                     -- Now create border texture inside the border frame
                     local border = frame.DragonUI_BorderFrame:CreateTexture(nil, 'ARTWORK', nil, 1)
-                    border:SetTexture(TEXTURES.border)
-                    border:SetTexCoord(GetPartyCoords("border"))
-                    border:SetSize(128, 64)
-                    border:SetPoint('TOPLEFT', 1, -2)
                     border:SetVertexColor(1, 1, 1, 1)
                     frame.DragonUI_BorderFrame.texture = border
                 end
+                ApplyPartySkin(frame)
 
                 if not frame.DragonUI_FlashContainer then
                     local flashContainer = CreateFrame("Frame", nil, frame)
@@ -1326,8 +1407,7 @@ local function StylePartyFrames()
 
                 if flash and frame.DragonUI_FlashContainer and flash:GetParent() ~= frame.DragonUI_FlashContainer then
                     flash:SetParent(frame.DragonUI_FlashContainer)
-                    flash:ClearAllPoints()
-                    flash:SetPoint('TOPLEFT', frame, 'TOPLEFT', 2, -2)
+                    UF.ApplySkinPiece(flash, UF.GetFrameSkin().party.flash, "TOPLEFT", frame, "TOPLEFT", 0, 0)
                 end
 
                 -- Move icons to HIGH strata container and configure layers
@@ -1469,21 +1549,6 @@ local function UpdateDisconnectedState(frame)
             name:SetTextColor(0.6, 0.6, 0.6, 1)
         end
 
-        -- Reposition icons so they don't get lost
-        local leaderIcon = _G[frame:GetName() .. 'LeaderIcon']
-        if leaderIcon then
-            leaderIcon:ClearAllPoints()
-            leaderIcon:SetPoint('TOPLEFT', 42, 9)
-            leaderIcon:SetSize(16, 16)
-        end
-
-        local masterLooterIcon = _G[frame:GetName() .. 'MasterIcon']
-        if masterLooterIcon then
-            masterLooterIcon:ClearAllPoints()
-            masterLooterIcon:SetPoint('TOPLEFT', 58, 11)
-            masterLooterIcon:SetSize(16, 16)
-        end
-
     else
         -- Connected member - undo exactly what was done when disconnecting
         frame.DragonUI_Disconnected = false
@@ -1511,21 +1576,6 @@ local function UpdateDisconnectedState(frame)
 
         if name then
             name:SetTextColor(1, 0.82, 0, 1) -- Normal yellow
-        end
-
-        -- Reposition icons (without recreating frames)
-        local leaderIcon = _G[frame:GetName() .. 'LeaderIcon']
-        if leaderIcon then
-            leaderIcon:ClearAllPoints()
-            leaderIcon:SetPoint('TOPLEFT', 42, 9)
-            leaderIcon:SetSize(16, 16)
-        end
-
-        local masterLooterIcon = _G[frame:GetName() .. 'MasterIcon']
-        if masterLooterIcon then
-            masterLooterIcon:ClearAllPoints()
-            masterLooterIcon:SetPoint('TOPLEFT', 58, 11)
-            masterLooterIcon:SetSize(16, 16)
         end
     end
 end
@@ -1602,16 +1652,7 @@ local function SetupPartyHooks()
 
             if PartyFrames.anchor and not InCombatLockdown() then
                 if frameIndex and frameIndex >= 1 and frameIndex <= 4 then
-                    frame:ClearAllPoints()
-                    local step = GetPartyStep()
-                    local orientation = GetOrientation()
-                    if orientation == 'horizontal' then
-                        local xOffset = (frameIndex - 1) * step
-                        frame:SetPoint("TOPLEFT", PartyFrames.anchor, "TOPLEFT", xOffset, 0)
-                    else
-                        local yOffset = (frameIndex - 1) * -step
-                        frame:SetPoint("TOPLEFT", PartyFrames.anchor, "TOPLEFT", 0, yOffset)
-                    end
+                    PlacePartyMemberFrame(frame, frameIndex, GetPartyStep(), GetOrientation())
                 end
             end
 
@@ -1691,6 +1732,13 @@ local function SetupPartyHooks()
 
     -- Additional hook for party member updates (compatible with 3.3.5a)
     hooksecurefunc("PartyMemberFrame_OnEvent", function(frame, event, eventUnit)
+        -- 3.3.5a shows the role icon only on PARTY_MEMBERS_CHANGED, which a /reload never fires.
+        if event == "PLAYER_ENTERING_WORLD" then
+            if GetPartyMember(frame:GetID()) then
+                PartyMemberFrame_UpdateAssignedRoles(frame)
+            end
+            return
+        end
         if event ~= "UNIT_HEALTH" and event ~= "UNIT_MAXHEALTH" then return end
         if not frame or (eventUnit ~= frame.unit and eventUnit ~= PARTY_UNIT_TOKENS[frame:GetID()]) then return end
         if frame:GetName() and frame:GetName():match("^PartyMemberFrame%d+$") then
@@ -1762,6 +1810,18 @@ local function SetupPartyHooks()
         end
     end)
     
+    hooksecurefunc("PartyMemberFrame_UpdateAssignedRoles", function(frame)
+        if frame and frame:GetName() and frame:GetName():match("^PartyMemberFrame%d+$") then
+            ApplyPartyRole(frame)
+        end
+    end)
+
+    hooksecurefunc("PartyMemberFrame_UpdatePvPStatus", function(frame)
+        if frame then
+            ApplyPartyPvP(frame)
+        end
+    end)
+
     -- ===============================================================
     -- DISCONNECT VISUAL FIX (mod-playerbots compatibility)
     -- ===============================================================
@@ -1819,7 +1879,13 @@ function PartyFrames:UpdateSettings()
     
     -- Only apply base styles - ACE3 handles class color
     StylePartyFrames()
-    
+    for i = 1, MAX_PARTY_MEMBERS do
+        local frame = _G['PartyMemberFrame' .. i]
+        if frame and frame.DragonUIStyled then
+            ApplyPartySkin(frame)
+        end
+    end
+
     -- Reposition buffs
     RepositionBlizzardBuffs()
     
@@ -1873,6 +1939,21 @@ function addon:RefreshPartyFrames()
     if PartyFrames and PartyFrames.UpdateSettings then
         PartyFrames:UpdateSettings()
     end
+end
+
+-- StylePartyFrames bails out while the editor is open, so scale and layout are re-applied here.
+function PartyFrames:ApplyLiveLayout()
+    if InCombatLockdown() then return end
+
+    local settings = GetSettings()
+    for i = 1, MAX_PARTY_MEMBERS do
+        local frame = _G['PartyMemberFrame' .. i]
+        if frame then
+            frame:SetScale((settings and settings.scale) or 1)
+        end
+    end
+
+    self:UpdateWidgets()
 end
 
 -- ===============================================================
@@ -2122,6 +2203,7 @@ if type(PartyMemberFrame_UpdateArt) == "function" then
         HideBlizzardTexts(frame)
         CreateCustomTexts(frame)
         UpdateDisconnectedState(frame)
+        ApplyPartyIcons(frame)
         ResetPartyPortrait(frame)
     end)
 end
@@ -2167,6 +2249,7 @@ if type(PartyMemberFrame_ToVehicleArt) == "function" then
         HideBlizzardTexts(frame)
         CreateCustomTexts(frame)
         UpdateDisconnectedState(frame)
+        ApplyPartyIcons(frame)
         ResetPartyPortrait(frame)
     end)
 end
@@ -2212,6 +2295,7 @@ if type(PartyMemberFrame_ToPlayerArt) == "function" then
         HideBlizzardTexts(frame)
         CreateCustomTexts(frame)
         UpdateDisconnectedState(frame)
+        ApplyPartyIcons(frame)
         ResetPartyPortrait(frame)
     end)
 end

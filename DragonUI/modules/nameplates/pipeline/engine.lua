@@ -22,6 +22,9 @@ local weakKey = { __mode = "k" }
 E.massQueue = E.massQueue or setmetatable({}, weakKey)
 E.functionQueue = E.functionQueue or setmetatable({}, weakKey)
 E.targetQueue = E.targetQueue or setmetatable({}, weakKey)
+-- Swapped in while the per-plate queue drains, so callbacks that queue again land next tick.
+local drainingTargetQueue = setmetatable({}, weakKey)
+local callbackSetPool = {}
 -- Pending full refreshes; weak-keyed, budgeted in ProcessQueues.
 E.pendingFullRefresh = E.pendingFullRefresh or setmetatable({}, weakKey)
 
@@ -45,8 +48,10 @@ function E.ResetQueues()
     for fn in pairs(E.functionQueue) do
         E.functionQueue[fn] = nil
     end
-    for plate in pairs(E.targetQueue) do
+    for plate, pending in pairs(E.targetQueue) do
         E.targetQueue[plate] = nil
+        wipe(pending)
+        callbackSetPool[#callbackSetPool + 1] = pending
     end
     for plate in pairs(E.pendingFullRefresh) do
         E.pendingFullRefresh[plate] = nil
@@ -65,9 +70,15 @@ function E.QueueFunction(func)
     end
 end
 
+-- A set per plate: with one slot, a same-frame UNIT_MANA or UNIT_AURA erased a queued cast start.
 function E.QueuePlate(plateData, func)
     if plateData and func then
-        E.targetQueue[plateData] = func
+        local pending = E.targetQueue[plateData]
+        if not pending then
+            pending = table.remove(callbackSetPool) or {}
+            E.targetQueue[plateData] = pending
+        end
+        pending[func] = true
     end
 end
 
@@ -147,11 +158,17 @@ function E.ProcessQueues()
         end
     end
 
-    for plateData, queuedFunction in pairs(E.targetQueue) do
-        E.targetQueue[plateData] = nil
+    local queue = E.targetQueue
+    E.targetQueue, drainingTargetQueue = drainingTargetQueue, queue
+    for plateData, pending in pairs(queue) do
+        queue[plateData] = nil
         if plateData and plateData.plate and plateData.plate.IsShown and plateData.plate:IsShown() then
-            queuedFunction(plateData)
+            for queuedFunction in pairs(pending) do
+                queuedFunction(plateData)
+            end
         end
+        wipe(pending)
+        callbackSetPool[#callbackSetPool + 1] = pending
     end
 end
 
@@ -285,11 +302,8 @@ function E.SyncShowVKeyCastbarCVar()
         end
     end
 
-    local nativeCastWanted = (cfg.showCastBar ~= false)
-    local likelyHDClient = (C_NamePlate and C_NamePlate.GetNamePlateForUnit)
-        or (UnitExists and UnitExists("nameplate1"))
-    likelyHDClient = likelyHDClient and true or false
-    local shouldForceOn = nativeCastWanted and likelyHDClient
+    -- Data source only (target shield; every plate on a patched exe); DragonUI hides its art.
+    local shouldForceOn = (cfg.showCastBar ~= false)
 
     if shouldForceOn then
         EnsureSaved()
@@ -328,6 +342,7 @@ function E.SyncConfigSnapshot(skipStackingCVar)
     NP.module._clampTargetEnabled = cfg.clampTarget == true
     NP.module._clampBossEnabled = cfg.clampBoss == true
     NP.module._clampTopInset = cfg.clampTopInset or 0
+    NP.unitcache.SyncConfig(cfg)
 
     -- Re-verify WorldFrame height each sync; external resets can invalidate the cached flag.
     local wantExtended = (NP.module._clampTargetEnabled or NP.module._clampBossEnabled) and true or false
@@ -412,6 +427,7 @@ local function EngineOnUpdate(_, elapsed)
     end
 
     -- 2. Deferred queues. Roster map first: it queues plates, so it cannot run inside a drain.
+    NP.unitcache.Flush()
     NP.identity.TickGroupTargetMatches()
     E.ProcessQueues()
 
@@ -466,6 +482,7 @@ local function EngineOnUpdate(_, elapsed)
 
     if NP.clickbox and NP.clickbox.TickPreview then
         NP.clickbox.TickPreview()
+        NP.clickbox.TickSecureResize()
     end
     if NP.auras and NP.auras.TickPreview then
         NP.auras.TickPreview()
@@ -548,11 +565,13 @@ local function EngineOnEvent(_, event, unit, ...)
         -- Target alpha stale at event time; resolved on next engine tick.
         NP.module.targetGUID = UnitGUID("target")
         NP.module._deferredTargetResolveFrames = 1
+        NP.unitcache.LearnUnit("target")
         return
     end
     if event == "PLAYER_FOCUS_CHANGED" then
         NP.module.focusGUID = UnitGUID("focus")
         E.QueueMass(CB.OnUpdateCastbar)
+        NP.unitcache.LearnUnit("focus")
         return
     end
     if event == "UPDATE_MOUSEOVER_UNIT" then
@@ -560,6 +579,7 @@ local function EngineOnEvent(_, event, unit, ...)
         if NP.quest and NP.quest.OnMouseover then
             NP.quest.OnMouseover()
         end
+        NP.unitcache.LearnUnit("mouseover")
         return
     end
     if event == "UNIT_TARGET" and unit then
@@ -618,12 +638,14 @@ local function EngineOnEvent(_, event, unit, ...)
         if NP.quest_coexist and NP.quest_coexist.Check then
             NP.quest_coexist.Check()
         end
+        NP.unitcache.MarkGroupDirty()
         return
     end
     if event == "PARTY_MEMBERS_CHANGED" or event == "RAID_ROSTER_UPDATE" then
         E.UpdatePartyArenaTokenMaps()
         NP.identity.RefreshGroupTargetMatches()
         E.QueueMass(CB.OnUpdateCastbar)
+        NP.unitcache.MarkGroupDirty()
         return
     end
     if event == "ARENA_OPPONENT_UPDATE" then
@@ -725,6 +747,10 @@ local function EngineOnEvent(_, event, unit, ...)
         -- Gate CLEU once via exported event sets and config snapshot.
         local timestamp = unit
         local subevent = ...
+        if NP.module._unitCacheCLEU then
+            local _, srcGUID, srcName, srcFlags, dstGUID, dstName, dstFlags = ...
+            NP.unitcache.OnCombatLog(srcGUID, srcName, srcFlags, dstGUID, dstName, dstFlags)
+        end
         if NP.auras.AURA_COMBATLOG_EVENTS[subevent] then
             NP.auras.HandleCombatLog(timestamp, ...)
         end
@@ -1015,6 +1041,7 @@ local function RunNameplatesRestore()
     for icon in pairs(NP.state.AuraGUIDByRaidIcon) do
         NP.state.AuraGUIDByRaidIcon[icon] = nil
     end
+    NP.unitcache.Stop()
 
     for _, plateData in pairs(NP.module.plates) do
         -- Hide module visuals and restore native chrome.

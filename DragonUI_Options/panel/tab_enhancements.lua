@@ -340,6 +340,18 @@ local function BuildEnhancementsTab(scroll)
     })
 
     C:AddToggle(ilvlSection, {
+        label = LO["Durability on Character Slots"],
+        desc = LO["Show each equipped item's durability percentage on its character panel slot, opposite the item level."],
+        getFunc = function() return GetModuleField("itemlevel", "show_durability") == true end,
+        setFunc = function(val)
+            EnsureModuleTable("itemlevel").show_durability = val
+            if addon.RefreshItemLevel then addon:RefreshItemLevel() end
+        end,
+        disabled = function() return not IsItemLevelEnabled() end,
+        requiresReload = false,
+    })
+
+    C:AddToggle(ilvlSection, {
         label = LO["Show in Tooltip"] or "Show in Tooltip",
         desc = LO["Also enable Blizzard's own item level line in item tooltips."]
             or "Also enable Blizzard's own item level line in item tooltips.",
@@ -382,6 +394,27 @@ local function BuildEnhancementsTab(scroll)
             requiresReload = false,
         })
     end
+
+    -- ====================================================================
+    -- CHARACTER ITEM COUNTS
+    -- ====================================================================
+    C:AddSpacer(scroll)
+    local ioSection = C:AddSection(scroll, LO["Character Item Counts"])
+
+    C:AddToggle(ioSection, {
+        label = LO["Show Character Item Counts"],
+        desc = LO["Shows how many of the hovered item each of your characters on this realm holds, split into bags, bank and equipped."],
+        getFunc = function() return IsEnabled("itemownership") end,
+        setFunc = function(val)
+            EnsureModuleTable("itemownership").enabled = val
+            if val then
+                if addon.ApplyItemOwnershipSystem then addon.ApplyItemOwnershipSystem() end
+            else
+                if addon.RestoreItemOwnershipSystem then addon.RestoreItemOwnershipSystem() end
+            end
+        end,
+        requiresReload = false,
+    })
 
     -- ====================================================================
     -- UNIT FRAME LAYERS
@@ -571,6 +604,135 @@ local function BuildEnhancementsTab(scroll)
     })
 
     -- ====================================================================
+    -- PERSONAL RESOURCE DISPLAY
+    -- ====================================================================
+    C:AddSpacer(scroll)
+    local prdSection = C:AddSection(scroll, LO["Personal Resource Display"])
+
+    C:AddToggle(prdSection, {
+        label = LO["Personal Resource Display"],
+        desc = LO["Add Health and Resource below your Character."],
+        getFunc = function() return GetModuleField("personalresource", "enabled") == true end,
+        setFunc = function(val)
+            EnsureModuleTable("personalresource")
+            addon.db.profile.modules.personalresource.enabled = val
+            if addon.RefreshPersonalResourceSystem then addon.RefreshPersonalResourceSystem() end
+        end,
+        requiresReload = false,
+    })
+
+    -- ====================================================================
+    -- SWING TIMER
+    -- ====================================================================
+    C:AddSpacer(scroll)
+    local swingSection = C:AddSection(scroll, LO["Swing Timer"])
+
+    C:AddToggle(swingSection, {
+        label = LO["Swing Timer"],
+        desc = LO["Show a bar with the time left until each weapon's next swing."],
+        getFunc = function() return GetModuleField("swingtimer", "enabled") == true end,
+        setFunc = function(val)
+            EnsureModuleTable("swingtimer")
+            addon.db.profile.modules.swingtimer.enabled = val
+            if addon.RefreshSwingTimerSystem then addon.RefreshSwingTimerSystem() end
+        end,
+        requiresReload = false,
+    })
+
+    -- ====================================================================
+    -- LEVEL UP ENHANCE
+    -- ====================================================================
+    C:AddSpacer(scroll)
+    local levelUpSection = C:AddSection(scroll, LO["Level Up Enhance"])
+
+    C:AddDescription(levelUpSection, LO["Animated level-up banner that lists what each new level unlocks: abilities, features, dungeons, raids and battlegrounds."])
+
+    local function LevelUpDisabled() return not IsEnabled("levelupenhance") end
+
+    C:AddToggle(levelUpSection, {
+        label = LO["Enable Level-Up Banner"],
+        getFunc = function() return IsEnabled("levelupenhance") end,
+        setFunc = function(val)
+            EnsureModuleTable("levelupenhance").enabled = val
+            if addon.RefreshLevelUpEnhanceSystem then addon.RefreshLevelUpEnhanceSystem() end
+            Panel:SelectTab("enhancements")
+        end,
+    })
+
+    C:AddSlider(levelUpSection, {
+        label = LO["Scale"],
+        desc = LO["Size of the banner and its list."],
+        dbPath = "levelupenhance.scale",
+        min = 0.6,
+        max = 1.6,
+        step = 0.05,
+        width = 200,
+        disabled = LevelUpDisabled,
+        callback = function()
+            if addon.RefreshLevelUpEnhance then addon.RefreshLevelUpEnhance() end
+        end,
+    })
+
+    C:AddToggle(levelUpSection, {
+        label = LO["Show Unlocks"],
+        desc = LO["Show what the new level unlocks, such as new abilities, features and dungeons."],
+        dbPath = "levelupenhance.show_unlocks",
+        disabled = LevelUpDisabled,
+        callback = function() Panel:SelectTab("enhancements") end,
+    })
+
+    local function ListDisabled()
+        return LevelUpDisabled() or not C:GetDBValue("levelupenhance.show_unlocks")
+    end
+
+    C:AddDropdown(levelUpSection, {
+        label = LO["Unlock Style"],
+        desc = LO["One at a time shows each unlock inside the banner in turn, as retail does. List shows them all together under the banner."],
+        values = {
+            banner = LO["One at a Time"],
+            list = LO["List"],
+        },
+        dbPath = "levelupenhance.unlock_style",
+        disabled = ListDisabled,
+        callback = function() Panel:SelectTab("enhancements") end,
+        width = 200,
+    })
+
+    C:AddToggle(levelUpSection, {
+        label = LO["Open the List Automatically"],
+        desc = LO["Open the list as soon as the banner appears. Otherwise, click the dot under the banner."],
+        dbPath = "levelupenhance.auto_expand",
+        indent = 18,
+        disabled = function()
+            return ListDisabled() or C:GetDBValue("levelupenhance.unlock_style") ~= "list"
+        end,
+    })
+
+    C:AddToggle(levelUpSection, {
+        label = LO["Unlocks in Chat"],
+        desc = LO["Print the unlocks after the level-up message in chat."],
+        dbPath = "levelupenhance.chat_unlocks",
+        indent = 18,
+        disabled = ListDisabled,
+    })
+
+    C:AddToggle(levelUpSection, {
+        label = LO["Pet Level-Up Banner"],
+        desc = LO["Show a banner when your hunter pet reaches a new level."],
+        dbPath = "levelupenhance.pet_levelup",
+        disabled = LevelUpDisabled,
+    })
+
+    C:AddButton(levelUpSection, {
+        label = LO["Test Banner"],
+        desc = LO["Show the banner for your next level (or /lvltest <level>)."],
+        callback = function()
+            if addon.TestLevelUpEnhance then addon.TestLevelUpEnhance() end
+        end,
+        disabled = LevelUpDisabled,
+    })
+
+    -- ====================================================================
     -- ENHANCED TOOLTIPS
     -- ====================================================================
     C:AddSpacer(scroll)
@@ -650,8 +812,43 @@ local function BuildEnhancementsTab(scroll)
         end,
         setFunc = function(val)
             EnsureModuleTable("tooltip").anchor_cursor = val
+            Panel:SelectTab("enhancements")
         end,
         disabled = function() return not IsEnabled("tooltip") end,
+        requiresReload = false,
+    })
+
+    C:AddSlider(ttSection, {
+        label = LO["Cursor Anchor Offset X"],
+        desc = LO["Horizontal offset from the cursor."],
+        min = -128, max = 128, step = 1,
+        getFunc = function()
+            return tonumber(GetModuleField("tooltip", "anchor_cursor_x")) or 20
+        end,
+        setFunc = function(val)
+            EnsureModuleTable("tooltip").anchor_cursor_x = val
+        end,
+        disabled = function()
+            return not IsEnabled("tooltip")
+                or GetModuleField("tooltip", "anchor_cursor") ~= true
+        end,
+        requiresReload = false,
+    })
+
+    C:AddSlider(ttSection, {
+        label = LO["Cursor Anchor Offset Y"],
+        desc = LO["Vertical offset from the cursor."],
+        min = -128, max = 128, step = 1,
+        getFunc = function()
+            return tonumber(GetModuleField("tooltip", "anchor_cursor_y")) or 20
+        end,
+        setFunc = function(val)
+            EnsureModuleTable("tooltip").anchor_cursor_y = val
+        end,
+        disabled = function()
+            return not IsEnabled("tooltip")
+                or GetModuleField("tooltip", "anchor_cursor") ~= true
+        end,
         requiresReload = false,
     })
 
@@ -665,6 +862,91 @@ local function BuildEnhancementsTab(scroll)
             EnsureModuleTable("tooltip").show_aura_source = val
         end,
         disabled = function() return not IsEnabled("tooltip") end,
+        requiresReload = false,
+    })
+
+    -- ====================================================================
+    -- MERCHANT AUTO SERVICES
+    -- ====================================================================
+    local merchantSection = C:AddSection(scroll, LO["Merchant Auto Services"])
+
+    C:AddDescription(merchantSection, LO["Automatically repair items and sell junk when you open a merchant window. Requires the Merchant module."])
+
+    C:AddToggle(merchantSection, {
+        label = LO["Auto Repair"],
+        desc = LO["Automatically repair all your items when a merchant window opens."],
+        getFunc = function()
+            return GetModuleField("merchant", "autoRepair") == true
+        end,
+        setFunc = function(val)
+            EnsureModuleTable("merchant").autoRepair = val
+        end,
+        disabled = function() return not IsEnabled("merchant") end,
+    })
+
+    C:AddToggle(merchantSection, {
+        label = LO["Use Guild Funds"],
+        desc = LO["Pay for automatic repairs with guild bank money when you have the right and the guild can cover the cost."],
+        getFunc = function()
+            return GetModuleField("merchant", "autoRepairGuild") == true
+        end,
+        setFunc = function(val)
+            EnsureModuleTable("merchant").autoRepairGuild = val
+        end,
+        disabled = function() return not IsEnabled("merchant") or GetModuleField("merchant", "autoRepair") ~= true end,
+        indent = 1,
+    })
+
+    C:AddToggle(merchantSection, {
+        label = LO["Auto Sell Junk"],
+        desc = LO["Automatically sell grey (junk) items when a merchant window opens."],
+        getFunc = function()
+            return GetModuleField("merchant", "autoSellJunk") == true
+        end,
+        setFunc = function(val)
+            EnsureModuleTable("merchant").autoSellJunk = val
+        end,
+        disabled = function() return not IsEnabled("merchant") end,
+    })
+
+    -- ====================================================================
+    -- LOOT ROLL
+    -- ====================================================================
+    C:AddSpacer(scroll)
+    local lootRollSection = C:AddSection(scroll, LO["Loot Roll"])
+
+    C:AddToggle(lootRollSection, {
+        label = LO["Auto Greed/DE"],
+        desc = LO["Automatically select greed or disenchant (when available) on green quality items. This will only work if you are the max level."],
+        dbPath = "lootroll.autoRoll",
+        requiresReload = false,
+    })
+
+    -- ====================================================================
+    -- AUTO-ACCEPT
+    -- ====================================================================
+    C:AddSpacer(scroll)
+    local autoAcceptSection = C:AddSection(scroll, LO["Auto-Accept"])
+
+    C:AddDescription(autoAcceptSection, LO["Party invites from the players you pick below are accepted for you; anyone else is left for you to answer."])
+
+    local function RefreshAutoAcceptCaches(value)
+        if value and addon.RefreshAutoAcceptCaches then addon.RefreshAutoAcceptCaches() end
+    end
+
+    C:AddToggle(autoAcceptSection, {
+        label = LO["Accept Invites from Friends"],
+        desc = LO["Automatically accept party invites from players on your friends list."],
+        dbPath = "autoaccept.friends",
+        callback = RefreshAutoAcceptCaches,
+        requiresReload = false,
+    })
+
+    C:AddToggle(autoAcceptSection, {
+        label = LO["Accept Invites from Guild Members"],
+        desc = LO["Automatically accept party invites from members of your guild."],
+        dbPath = "autoaccept.guild",
+        callback = RefreshAutoAcceptCaches,
         requiresReload = false,
     })
 end

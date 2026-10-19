@@ -22,6 +22,16 @@ local function RefreshTargetFocusAuraTimers()
     end
 end
 
+local function RefreshTargetFocusAuraLayout()
+    if addon.RefreshTargetFocusAuraLayout then
+        addon.RefreshTargetFocusAuraLayout()
+    end
+end
+
+local function RefreshFocusFrame()
+    if addon.RefreshFocusFrame then addon.RefreshFocusFrame() end
+end
+
 -- Discrete steps mapped to real wrap math: N per full 122px row -> size = floor(125/N) - 3; 6 = Blizzard 17px.
 local function PerRowToSize(perRow)
     return math.floor(125 / perRow) - 3
@@ -217,7 +227,32 @@ local function RefreshAuraBorders()
     end
 end
 
-local function BuildAurasTab(scroll)
+-- Dropdown index order; options dropdowns list entries by key.
+local BORDER_STYLES = { "detailed", "rounded", "square" }
+
+-- Detailed keeps the untinted action-bar art, so the buff color only drives Rounded and Square.
+local function IsBuffColorDisabled()
+    local style = GetAuraBordersField("border_style")
+    return not IsAuraBordersEnabled() or (style ~= "rounded" and style ~= "square")
+end
+
+-- ============================================================================
+-- ACTIVE SUB-TAB STATE
+-- ============================================================================
+
+local activeSubTab = "player"
+
+local subTabs = {
+    { key = "player", label = LO["Player"] },
+    { key = "targetfocus", label = LO["Target"] .. " / " .. LO["Focus"] },
+}
+
+-- Search navigation sub-tab setter.
+Panel.subTabSetters = Panel.subTabSetters or {}
+Panel.subTabSetters["auras"] = function(key) activeSubTab = key or "player" end
+
+-- Borders and tooltips reach every aura icon, so they sit above the sub-tabs.
+local function BuildAuraStyle(scroll)
     -- ====================================================================
     -- AURA BORDERS
     -- ====================================================================
@@ -238,24 +273,36 @@ local function BuildAurasTab(scroll)
         requiresReload = false,
     })
 
+    local buffColorPicker
+
     C:AddDropdown(borderSection, {
         label = LO["Border Style"],
         values = {
-            [1] = LO["Rounded"],
-            [2] = LO["Square"],
+            [1] = LO["Detailed"],
+            [2] = LO["Rounded"],
+            [3] = LO["Square"],
         },
         getFunc = function()
-            return GetAuraBordersField("custom_border") and 1 or 2
+            local style = GetAuraBordersField("border_style")
+            for index, key in ipairs(BORDER_STYLES) do
+                if key == style then return index end
+            end
+            return 1
         end,
         setFunc = function(val)
-            C:EnsureModuleTable("auraborders").custom_border = (val == 1)
+            C:EnsureModuleTable("auraborders").border_style = BORDER_STYLES[val] or BORDER_STYLES[1]
         end,
-        callback = RefreshAuraBorders,
+        callback = function()
+            RefreshAuraBorders()
+            if buffColorPicker and buffColorPicker.SetDisabled then
+                buffColorPicker:SetDisabled(IsBuffColorDisabled())
+            end
+        end,
         disabled = function() return not IsAuraBordersEnabled() end,
         width = 200,
     })
 
-    C:AddColorPicker(borderSection, {
+    buffColorPicker = C:AddColorPicker(borderSection, {
         label = LO["Buff Border Color"],
         getFunc = function()
             local c = GetAuraBordersField("buff_color")
@@ -269,7 +316,7 @@ local function BuildAurasTab(scroll)
             ab.buff_color_user_override = true
         end,
         callback = RefreshAuraBorders,
-        disabled = function() return not IsAuraBordersEnabled() end,
+        disabled = IsBuffColorDisabled,
         hasAlpha = false,
     })
 
@@ -281,8 +328,8 @@ local function BuildAurasTab(scroll)
     local tooltipSection = C:AddSection(scroll, LO["Aura Tooltips"])
 
     C:AddToggle(tooltipSection, {
-        label = LO["Show Aura Spell ID"],
-        desc = LO["Show the spell ID on buff and debuff tooltips. Requires the Tooltip module."],
+        label = LO["Show Spell IDs"],
+        desc = LO["Show spell IDs on aura, spell and chat-link tooltips. Requires the Tooltip module."],
         getFunc = function()
             local tt = addon.db.profile.modules and addon.db.profile.modules.tooltip
             return tt and tt.show_aura_spell_id == true
@@ -298,7 +345,9 @@ local function BuildAurasTab(scroll)
     })
 
     C:AddSpacer(scroll)
+end
 
+local function BuildPlayerAuras(scroll)
     -- ====================================================================
     -- WEAPON ENCHANTS
     -- ====================================================================
@@ -402,6 +451,13 @@ local function BuildAurasTab(scroll)
 
     C:AddHeading(playerAuraSection, LO["Debuffs"])
 
+    C:AddToggle(playerAuraSection, {
+        label = LO["Show Debuffs"],
+        desc = LO["Show your debuffs on the player aura bar."],
+        dbPath = "buffs.show_debuffs",
+        callback = RefreshPlayerAuraSpacing,
+    })
+
     C:AddSlider(playerAuraSection, {
         label = LO["Debuff Icon Scale"],
         dbPath = "buffs.debuff_scale",
@@ -481,9 +537,96 @@ local function BuildAurasTab(scroll)
         callback = RefreshPlayerAuraSpacing,
     })
 
+
+    -- ====================================================================
+    -- RESET POSITION
+    -- ====================================================================
+    C:AddSpacer(scroll)
+    local resetSection = C:AddSection(scroll, LO["Positions"])
+
+    C:AddButton(resetSection, {
+        label = LO["Reset Buff Frame Position"],
+        width = 220,
+        callback = function()
+            if addon.BuffFrameModule then
+                addon.BuffFrameModule:ResetBuffFramePosition()
+            end
+            addon:Print(LO["Buff frame position reset."])
+        end,
+    })
+
+    C:AddButton(resetSection, {
+        label = LO["Reset Weapon Enchant Position"],
+        width = 220,
+        callback = function()
+            if addon.db.profile.widgets and addon.db.profile.widgets.weapon_enchants then
+                local w = addon.db.profile.widgets.weapon_enchants
+                w.anchor = "TOPRIGHT"
+                w.posX = -100
+                w.posY = -15
+                w.custom_position = false
+            end
+            if addon.BuffFrameModule then
+                addon.BuffFrameModule:UpdateWeaponEnchantPosition()
+            end
+            addon:Print(LO["Weapon enchant position reset."])
+        end,
+    })
+
+    C:AddSpacer(resetSection)
+
+    local isDebuffDetached = C:GetDBValue("widgets.debuffs.custom_position")
+    if isDebuffDetached then
+        C:AddDescription(resetSection, "|cff" .. C.Theme.accentHex .. "- " .. LO["Debuffs detached - positioned freely via Editor Mode"] .. "|r")
+    else
+        C:AddDescription(resetSection, "|cffaaaaaa- " .. LO["Debuffs attached - follow buff row"] .. "|r")
+    end
+
+    C:AddButton(resetSection, {
+        label = LO["Reset Debuff Position"],
+        width = 220,
+        disabled = function()
+            return not C:GetDBValue("widgets.debuffs.custom_position")
+        end,
+        callback = function()
+            if addon.BuffFrameModule then
+                addon.BuffFrameModule:ResetDebuffPosition()
+            end
+            addon:Print(LO["Debuff position reset."])
+            Panel:SelectTab("auras")
+        end,
+    })
+end
+
+local function BuildTargetFocusAuras(scroll)
     -- ====================================================================
     -- TARGET/FOCUS AURA CUSTOMIZATION
     -- ====================================================================
+    -- Same settings as the Unit Frames sub-tabs (one database key each), repeated here where the aura options live.
+    local showSection = C:AddSection(scroll, LO["Show Auras"])
+
+    C:AddHeading(showSection, LO["Target"])
+    C:AddToggle(showSection, {
+        label = LO["Show Buffs"],
+        desc = LO["Show the buffs under the target frame."],
+        dbPath = "unitframe.target.show_buffs",
+        callback = RefreshTargetFocusAuraLayout,
+    })
+    C:AddToggle(showSection, {
+        label = LO["Show Debuffs"],
+        desc = LO["Show the debuffs under the target frame."],
+        dbPath = "unitframe.target.show_debuffs",
+        callback = RefreshTargetFocusAuraLayout,
+    })
+
+    C:AddHeading(showSection, LO["Focus"])
+    C:AddToggle(showSection, {
+        label = LO["Show Buff/Debuff on Focus"],
+        desc = LO["Uses the native large focus frame mode to show buffs and debuffs on the focus frame."],
+        dbPath = "unitframe.focus.show_buff_debuff",
+        callback = RefreshFocusFrame,
+    })
+
     C:AddSpacer(scroll)
     local timerSection = C:AddSection(scroll, LO["Aura Timers"])
     local iconSection
@@ -928,65 +1071,25 @@ local function BuildAurasTab(scroll)
     })
 
     RefreshAuraControlStates()
+end
 
-    -- ====================================================================
-    -- RESET POSITION
-    -- ====================================================================
-    C:AddSpacer(scroll)
-    local resetSection = C:AddSection(scroll, LO["Positions"])
+local subTabBuilders = {
+    player = BuildPlayerAuras,
+    targetfocus = BuildTargetFocusAuras,
+}
 
-    C:AddButton(resetSection, {
-        label = LO["Reset Buff Frame Position"],
-        width = 220,
-        callback = function()
-            if addon.BuffFrameModule then
-                addon.BuffFrameModule:ResetBuffFramePosition()
-            end
-            addon:Print(LO["Buff frame position reset."])
-        end,
-    })
+local function BuildAurasTab(scroll)
+    BuildAuraStyle(scroll)
 
-    C:AddButton(resetSection, {
-        label = LO["Reset Weapon Enchant Position"],
-        width = 220,
-        callback = function()
-            if addon.db.profile.widgets and addon.db.profile.widgets.weapon_enchants then
-                local w = addon.db.profile.widgets.weapon_enchants
-                w.anchor = "TOPRIGHT"
-                w.posX = -100
-                w.posY = -15
-                w.custom_position = false
-            end
-            if addon.BuffFrameModule then
-                addon.BuffFrameModule:UpdateWeaponEnchantPosition()
-            end
-            addon:Print(LO["Weapon enchant position reset."])
-        end,
-    })
+    C:AddSubTabs(scroll, subTabs, activeSubTab, function(key)
+        activeSubTab = key
+        Panel:SelectTab("auras")
+    end, subTabBuilders)
 
-    C:AddSpacer(resetSection)
-
-    local isDebuffDetached = C:GetDBValue("widgets.debuffs.custom_position")
-    if isDebuffDetached then
-        C:AddDescription(resetSection, "|cff1784d1- " .. LO["Debuffs detached - positioned freely via Editor Mode"] .. "|r")
-    else
-        C:AddDescription(resetSection, "|cffaaaaaa- " .. LO["Debuffs attached - follow buff row"] .. "|r")
+    if not Panel.indexing then
+        local builder = subTabBuilders[activeSubTab]
+        if builder then builder(scroll) end
     end
-
-    C:AddButton(resetSection, {
-        label = LO["Reset Debuff Position"],
-        width = 220,
-        disabled = function()
-            return not C:GetDBValue("widgets.debuffs.custom_position")
-        end,
-        callback = function()
-            if addon.BuffFrameModule then
-                addon.BuffFrameModule:ResetDebuffPosition()
-            end
-            addon:Print(LO["Debuff position reset."])
-            Panel:SelectTab("auras")
-        end,
-    })
 end
 
 -- Register the tab (order 12 — after Enhancements, before Profiles)
