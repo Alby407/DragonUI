@@ -417,7 +417,7 @@ local function styleHotkey(button)
     local text = ResolveButtonHotkeyText()
 
     hotkey:SetAlpha(1)
-    if isNativeRangeDot then
+    if isNativeRangeDot and (not text or text == '') then
         if db.hotkey.range then
             hotkey:SetText(RANGE_INDICATOR)
             hotkey:Hide()
@@ -1054,6 +1054,7 @@ local function SetupHooks()
         if name and name:match("^ActionButton%d+$") then
             button:SetAttribute('showgrid', 1)
             button:Show()
+            if not KeyBindModeActive() then styleHotkey(button) end
         end
     end)
     

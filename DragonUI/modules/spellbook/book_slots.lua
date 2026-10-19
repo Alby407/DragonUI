@@ -15,6 +15,7 @@ local TEXT_W = GRID.cardW - TEXT_LEFT - TEXT_RIGHT
 -- Icon art offsets below are measured on a 40-unit icon button and grow with it.
 local GROW = GRID.iconButton / 40
 local nameLine, subLine = 16, 13
+local TRAINABLE_GREEN = { 0.06, 0.45, 0.06 }
 
 local SHAPES = {
     square = {
@@ -385,9 +386,12 @@ function Book.PaintCard(card, entry)
     card.icon:SetVertexColor(1, 1, 1)
     card.icon:SetDesaturated(grey)
     local alpha = grey and 0.6 or 1
+    local trainable = grey and entry.state == "ready"
     card.icon:SetAlpha(alpha)
     card.name:SetAlpha(alpha)
-    card.sub:SetAlpha(alpha)
+    card.sub:SetAlpha(trainable and 1 or alpha)
+    local subColor = trainable and TRAINABLE_GREEN or Book.INK
+    card.sub:SetTextColor(subColor[1], subColor[2], subColor[3])
     local width = Book.CardTextWidth()
     card.name:SetWidth(width)
     card.sub:SetWidth(width)
