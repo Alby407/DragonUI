@@ -452,6 +452,9 @@ do
         health = { w = 120, h = 16, x = 2, y = -3 },
         mana = { w = 120, h = 11, x = 2, y = -16.5 },
     }
+    -- The Forever glows (status/combat) are cut for the 2:1 HD wells and
+    -- would sit across the Camelot three-band art, so leave them off.
+    player.glows = nil
     camelot.player = player
 
     local target = copy(base.target)
@@ -461,6 +464,8 @@ do
         health = { w = 120, h = 16, x = -1.25, y = -3 },
         mana = { w = 120, h = 11, x = 6.25, y = -16.5 },
     }
+    target.glows = nil
+    target.flash = nil
     camelot.target = target
 
     UF.SKINS.camelot = camelot
