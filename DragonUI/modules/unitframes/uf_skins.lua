@@ -422,14 +422,64 @@ local function UnitFrameConfig()
     return addon.db and addon.db.profile and addon.db.profile.unitframe
 end
 
+-- Camelot: Forever's classic-flavoured frame art from the client's camelot cells.
+-- Same three-band layout as Forever, but health and mana wells are nearly equal.
+do
+    local base = UF.SKINS.forever
+    local camelot = {}
+    for kind, skin in pairs(base) do
+        camelot[kind] = skin
+    end
+
+    local function copy(t)
+        local o = {}
+        for k, v in pairs(t) do
+            o[k] = v
+        end
+        return o
+    end
+
+    local function reskin(piece, file)
+        local o = copy(piece)
+        o.file = ART .. "Camelot\\" .. file
+        return o
+    end
+
+    local player = copy(base.player)
+    player.background = reskin(base.player.background, "Player-BACKGROUND")
+    player.border = reskin(base.player.background, "Player-BACKGROUND")
+    player.bars = {
+        health = { w = 120, h = 16, x = 2, y = -3 },
+        mana = { w = 120, h = 11, x = 2, y = -16.5 },
+    }
+    camelot.player = player
+
+    local target = copy(base.target)
+    target.background = reskin(base.target.background, "Target-BACKGROUND")
+    target.border = reskin(base.target.background, "Target-BACKGROUND")
+    target.bars = {
+        health = { w = 120, h = 16, x = -1.25, y = -3 },
+        mana = { w = 120, h = 11, x = 6.25, y = -16.5 },
+    }
+    camelot.target = target
+
+    UF.SKINS.camelot = camelot
+end
+
 function UF.GetFrameStyle()
     local config = UnitFrameConfig()
     local key = config and config.frame_style
+    -- Camelot is a Forever variant: every Forever behaviour (level badge, cast art, ...) applies.
+    if key == "camelot" then
+        return "forever"
+    end
     return UF.SKINS[key] and key or "dragonui"
 end
 
 function UF.GetFrameSkin()
-    return UF.SKINS[UF.GetFrameStyle()]
+    local config = UnitFrameConfig()
+    local key = config and config.frame_style
+    return UF.SKINS[key] or UF.SKINS.dragonui
 end
 
 -- "auto" (or anything unknown) follows the frame art, so each art keeps its own look by default.

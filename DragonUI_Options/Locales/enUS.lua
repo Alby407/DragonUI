@@ -983,6 +983,7 @@ L["Dragon Decoration"] = true
 L["Show PvP Icon"] = true
 L["PvP Icon Style"] = true
 L["Forever"] = true
+L["Camelot"] = true
 L["Unit Frame Art"] = true
 L["Art of the player, target, focus, ToT, ToF, pet and party frames."] = true
 L["Level Style"] = true

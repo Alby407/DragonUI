@@ -40,6 +40,7 @@ local dragonValues = {
 local frameStyleValues = {
     dragonui = LO["DragonUI"],
     forever  = LO["Forever"],
+    camelot  = LO["Camelot"],
 }
 
 local autoStyleValues = {
