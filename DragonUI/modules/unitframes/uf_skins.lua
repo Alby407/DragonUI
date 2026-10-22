@@ -449,8 +449,8 @@ do
     player.background = reskin(base.player.background, "Player-BACKGROUND")
     player.border = reskin(base.player.background, "Player-BORDER")
     player.bars = {
-        health = { w = 120, h = 16, x = 2, y = -3 },
-        mana = { w = 120, h = 11, x = 2, y = -16.5 },
+        health = { w = 120, h = 16, x = 3.5, y = -3 },
+        mana = { w = 120, h = 11, x = 3.5, y = -16.5 },
     }
     -- The Forever glows (status/combat) are cut for the 2:1 HD wells and
     -- would sit across the Camelot three-band art, so leave them off.
@@ -462,7 +462,7 @@ do
     target.border = reskin(base.target.background, "Target-BORDER")
     target.bars = {
         health = { w = 120, h = 16, x = -1.25, y = -3 },
-        mana = { w = 120, h = 11, x = 6.25, y = -16.5 },
+        mana = { w = 120, h = 11, x = 2.5, y = -16.5 },
     }
     target.glows = nil
     -- Keep Forever's red threat flash; its spot is tuned to the same ring anchor.
