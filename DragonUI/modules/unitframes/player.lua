@@ -56,6 +56,9 @@ local PlayerLevelText = _G.PlayerLevelText
 -- Texture paths from shared core (single source of truth)
 local TEXTURES = UF.TEXTURES.player
 
+-- Camelot's three-band wells use flat fills; the retail bar art is drawn for 2:1 wells.
+local CAMELOT_BARS = "Interface\\AddOns\\DragonUI\\Textures\\UnitFrames\\Camelot\\"
+
 -- Keep a fixed on-screen border size so higher-resolution replacements
 -- do not render larger than the original DragonUI frame.
 local PLAYER_BORDER_WIDTH = 256
@@ -218,6 +221,10 @@ local DF_POWER_COLORS = {
 
 -- Get the correct power bar texture path, applying user texture override ONLY in fat mode
 local function GetPowerBarTexture(powerTypeString)
+    -- Camelot uses its own flat fills so health and power read as the same bar family.
+    if UF.GetSkinKey() == "camelot" then
+        return CAMELOT_BARS .. "Bar-" .. powerTypeString
+    end
     -- Override textures only apply when fat healthbar is active
     if IsFatHealthbarActive() then
         local config = GetPlayerConfig()
@@ -1303,7 +1310,7 @@ local function UpdatePlayerHealthBarColor()
 
     if config.classcolor then
         --  USE STATUS TEXTURE (WHITE) FOR CLASS COLOR
-        local statusTexturePath = TEXTURES.HEALTH_STATUS
+        local statusTexturePath = UF.GetSkinKey() == "camelot" and CAMELOT_BARS .. "Bar-White" or TEXTURES.HEALTH_STATUS
         if texture:GetTexture() ~= statusTexturePath then
             texture:SetTexture(statusTexturePath)
         end
@@ -1318,7 +1325,7 @@ local function UpdatePlayerHealthBarColor()
         end
     else
         --  USE NORMAL TEXTURE (COLORED) WITHOUT CLASS COLOR
-        local normalTexturePath = TEXTURES.HEALTH_BAR
+        local normalTexturePath = UF.GetSkinKey() == "camelot" and CAMELOT_BARS .. "Bar-Health" or TEXTURES.HEALTH_BAR
         if texture:GetTexture() ~= normalTexturePath then
             texture:SetTexture(normalTexturePath)
         end

@@ -66,6 +66,7 @@ function UF.TargetStyle.Create(opts)
 
     -- Shared texture / constant tables from uf_core
     local TEXTURES    = UF.TEXTURES.targetStyle
+    local CAMELOT_BARS = "Interface\\AddOns\\DragonUI\\Textures\\UnitFrames\\Camelot\\"
     local POWER_MAP   = UF.POWER_MAP
 
     local NAME_BG_COLOR_PALETTE = {
@@ -91,12 +92,11 @@ function UF.TargetStyle.Create(opts)
     local function BarTexture(powerName)
         if UF.GetSkinKey() == "camelot" then
             if powerName == "Health" then
-                return UF.TEXTURES.player.HEALTH_BAR
+                return CAMELOT_BARS .. "Bar-Health"
             elseif powerName == "Health-Status" then
-                return UF.TEXTURES.player.HEALTH_STATUS
+                return CAMELOT_BARS .. "Bar-White"
             end
-            local power = UF.TEXTURES.player.POWER_BARS[powerName]
-            return power or UF.TEXTURES.player.POWER_BARS.MANA
+            return CAMELOT_BARS .. "Bar-" .. powerName
         end
         return BarPrefix() .. powerName
     end
