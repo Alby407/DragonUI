@@ -1061,6 +1061,11 @@ function UF.TargetStyle.Create(opts)
         flash:SetDrawLayer("BACKGROUND")
         -- Portrait off, the same contour without the ring (uf_compact.lua).
         local spot = UF.GetFrameSkin()[Kind()].flash
+        -- Skins without a threat-flash spot (Camelot) simply leave retail's off.
+        if not spot then
+            flash:Hide()
+            return
+        end
         flash:SetTexture(spot.file or TEXTURES.THREAT)
         flash:SetTexCoord(0, 376/512, 0, 134/256)
         flash:ClearAllPoints()
