@@ -484,10 +484,15 @@ function UF.GetFrameStyle()
     return UF.SKINS[key] and key or "dragonui"
 end
 
-function UF.GetFrameSkin()
+-- The selected skin key itself (Camelot is a distinct skin even though it borrows Forever behaviour).
+function UF.GetSkinKey()
     local config = UnitFrameConfig()
     local key = config and config.frame_style
-    return UF.SKINS[key] or UF.SKINS.dragonui
+    return UF.SKINS[key] and key or "dragonui"
+end
+
+function UF.GetFrameSkin()
+    return UF.SKINS[UF.GetSkinKey()]
 end
 
 -- "auto" (or anything unknown) follows the frame art, so each art keeps its own look by default.

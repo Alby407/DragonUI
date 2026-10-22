@@ -86,6 +86,21 @@ function UF.TargetStyle.Create(opts)
         return UF.IsCompact(configKey) and UF.TEXTURES.compact.BAR_PREFIX or TEXTURES.BAR_PREFIX
     end
 
+    -- Camelot's wells are the player frame's size and style, so it uses the player
+    -- bar fills instead of the 2:1 target art (whose borders squash at 16/11).
+    local function BarTexture(powerName)
+        if UF.GetSkinKey() == "camelot" then
+            if powerName == "Health" then
+                return UF.TEXTURES.player.HEALTH_BAR
+            elseif powerName == "Health-Status" then
+                return UF.TEXTURES.player.HEALTH_STATUS
+            end
+            local power = UF.TEXTURES.player.POWER_BARS[powerName]
+            return power or UF.TEXTURES.player.POWER_BARS.MANA
+        end
+        return BarPrefix() .. powerName
+    end
+
     local function ApplyNameBackgroundLayout()
         if not NameBackground or not HealthBar then return end
 
@@ -310,7 +325,7 @@ function UF.TargetStyle.Create(opts)
         if not texture then return end
 
         if config.classcolor and UnitIsPlayer(unitToken) then
-            local statusPath = BarPrefix() .. "Health-Status"
+            local statusPath = BarTexture("Health-Status")
             if texture:GetTexture() ~= statusPath then
                 texture:SetTexture(statusPath)
                 texture:SetDrawLayer("ARTWORK", 1)
@@ -323,7 +338,7 @@ function UF.TargetStyle.Create(opts)
                 texture:SetVertexColor(1, 1, 1, 1)
             end
         else
-            local normalPath = BarPrefix() .. "Health"
+            local normalPath = BarTexture("Health")
             if texture:GetTexture() ~= normalPath then
                 texture:SetTexture(normalPath)
                 texture:SetDrawLayer("ARTWORK", 1)
@@ -345,7 +360,7 @@ function UF.TargetStyle.Create(opts)
 
         local powerType = UnitPowerType(unitToken)
         local powerName = POWER_MAP[powerType] or "Mana"
-        texture:SetTexture(BarPrefix() .. powerName)
+        texture:SetTexture(BarTexture(powerName))
         texture:SetDrawLayer("ARTWORK", 1)
         texture:SetVertexColor(1, 1, 1)
 
@@ -687,7 +702,7 @@ function UF.TargetStyle.Create(opts)
 
                 local powerType = UnitPowerType(unitToken)
                 local powerName = POWER_MAP[powerType] or "Mana"
-                texture:SetTexture(BarPrefix() .. powerName)
+                texture:SetTexture(BarTexture(powerName))
                 texture:SetDrawLayer("ARTWORK", 1)
                 texture:SetVertexColor(1, 1, 1)
                 ManaBar:SetStatusBarColor(1, 1, 1)
@@ -1396,7 +1411,7 @@ function UF.TargetStyle.Create(opts)
                         local cfg = GetConfig()
                         if cfg.classcolor then
                             tex:SetTexture(
-                                BarPrefix() .. "Health-Status")
+                                BarTexture("Health-Status"))
                             local _, cls = UnitClass("player")
                             local clr = RAID_CLASS_COLORS[cls]
                             if clr then
@@ -1407,7 +1422,7 @@ function UF.TargetStyle.Create(opts)
                             end
                         else
                             tex:SetTexture(
-                                BarPrefix() .. "Health")
+                                BarTexture("Health"))
                             tex:SetVertexColor(1, 1, 1, 1)
                         end
                         if maxHP > 0 then
@@ -1428,7 +1443,7 @@ function UF.TargetStyle.Create(opts)
                     local tex = ManaBar:GetStatusBarTexture()
                     if tex then
                         local pName = POWER_MAP[pType] or "Mana"
-                        tex:SetTexture(BarPrefix() .. pName)
+                        tex:SetTexture(BarTexture(pName))
                         tex:SetDrawLayer("ARTWORK", 1)
                         tex:SetVertexColor(1, 1, 1, 1)
                         if maxPwr > 0 then
@@ -1781,3 +1796,4 @@ function UF.TargetStyle.Create(opts)
         updateCache          = updateCache,
     }
 end
+
