@@ -447,7 +447,7 @@ do
 
     local player = copy(base.player)
     player.background = reskin(base.player.background, "Player-BACKGROUND")
-    player.border = reskin(base.player.background, "Player-BACKGROUND")
+    player.border = reskin(base.player.background, "Player-BORDER")
     player.bars = {
         health = { w = 120, h = 16, x = 2, y = -3 },
         mana = { w = 120, h = 11, x = 2, y = -16.5 },
@@ -459,7 +459,7 @@ do
 
     local target = copy(base.target)
     target.background = reskin(base.target.background, "Target-BACKGROUND")
-    target.border = reskin(base.target.background, "Target-BACKGROUND")
+    target.border = reskin(base.target.background, "Target-BORDER")
     target.bars = {
         health = { w = 120, h = 16, x = -1.25, y = -3 },
         mana = { w = 120, h = 11, x = 6.25, y = -16.5 },
