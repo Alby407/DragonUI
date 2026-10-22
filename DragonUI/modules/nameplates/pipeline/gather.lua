@@ -562,6 +562,7 @@ function NP.gather.SyncHealth(plateData, value)
     if not src or not bar then return end
 
     if NP.gather.IsTotemIconOnlyActive(plateData) then
+        NP.forever.HideLevel(plateData)
         bar:Hide()
         if plateData.minaHpPct then plateData.minaHpPct:Hide() end
         if plateData.minaHpNum then plateData.minaHpNum:Hide() end
@@ -766,6 +767,7 @@ end
 function NP.gather.SyncName(plateData, unit)
     if not plateData.minaName then return end
     if NP.gather.IsTotemIconOnlyActive(plateData) then
+        NP.forever.HideLevel(plateData)
         plateData.minaName:Hide()
         if plateData.minaBossSkull then plateData.minaBossSkull:Hide() end
         if plateData.minaHpPct then plateData.minaHpPct:Hide() end
@@ -781,6 +783,7 @@ function NP.gather.SyncName(plateData, unit)
     local nameOnly = headline and NP.gather.IsFriendlyNameOnlyActive(plateData) -- friendly PLAYER headline
     -- Resolve headline data even when headlineExcludeTarget; ready on un-target.
     local nameOnlyResolve = NP.gather.IsFriendlyNameOnlyActive(plateData)
+    local forever = NP.config.IsForeverSkin()
     local centerOnly = cfg.centerNameOnly == true or headline
     local suppressLevel = headline  -- centerNameOnly alone no longer hides level
 
@@ -883,7 +886,7 @@ function NP.gather.SyncName(plateData, unit)
             and RAID_CLASS_COLORS[plateData._headlineClass]
         if cc then r, g, b = cc.r, cc.g, cc.b end
     end
-    local detachedLevel = showLevelPrefix and cfg.levelPosition == "left"
+    local detachedLevel = showLevelPrefix and (cfg.levelPosition == "left" or forever)
     local displayName
     if showLevelPrefix and not detachedLevel then
         displayName = NP.discovery.FormatPlateName(plateData, levelUnit, fallbackLevel)
@@ -901,7 +904,7 @@ function NP.gather.SyncName(plateData, unit)
     end
     if plateData.minaBossSkull and plateData.minaBossSkull.SetSize then
         plateData.minaBossSkull:SetSize(bossSkullSize, bossSkullSize)
-        if showsBossSkull then
+        if showsBossSkull and not forever then
             plateData.minaBossSkull:Show()
         else
             plateData.minaBossSkull:Hide()
@@ -909,7 +912,7 @@ function NP.gather.SyncName(plateData, unit)
     end
     if plateData.minaNameRow then
         local leftInset = 0
-        if showsBossSkull and not centerOnly then
+        if showsBossSkull and not centerOnly and not forever then
             leftInset = bossSkullSize + bossSkullGap + bossSkullNameLeftShift
         end
         NP.layout.AnchorPlateName(plateData, centerOnly, leftInset)
@@ -928,7 +931,7 @@ function NP.gather.SyncName(plateData, unit)
     -- Detached level readout beside the bar (optional; otherwise baked into the name above).
     local levelFS = plateData.minaLevel
     if levelFS then
-        if detachedLevel then
+        if detachedLevel and not forever then
             local levelText, lr, lg, lb = NP.discovery.GetLevelDisplay(plateData, levelUnit, fallbackLevel)
             if levelText then
                 if plateData._levelTextLast ~= levelText then
@@ -949,6 +952,8 @@ function NP.gather.SyncName(plateData, unit)
             levelFS:Hide()
         end
     end
+
+    NP.forever.SyncLevel(plateData, levelUnit, fallbackLevel, showLevelPrefix, showsBossSkull)
 
     if plateData.minaSubTitle then
         -- Cache subtitle even when headlineExcludeTarget; ready on un-target.
