@@ -1308,7 +1308,8 @@ local function UpdatePlayerHealthBarColor()
         return
     end
 
-    if config.classcolor then
+    -- Camelot always uses the green Classic health fill, even with class colors on.
+    if config.classcolor and UF.GetSkinKey() ~= "camelot" then
         --  USE STATUS TEXTURE (WHITE) FOR CLASS COLOR
         local statusTexturePath = UF.GetSkinKey() == "camelot" and CAMELOT_BARS .. "Bar-White" or TEXTURES.HEALTH_STATUS
         if texture:GetTexture() ~= statusTexturePath then

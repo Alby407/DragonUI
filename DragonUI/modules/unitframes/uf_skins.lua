@@ -465,7 +465,8 @@ do
         mana = { w = 120, h = 11, x = 6.25, y = -16.5 },
     }
     target.glows = nil
-    target.flash = nil
+    -- Keep Forever's red threat flash; its spot is tuned to the same ring anchor.
+    target.flash = copy(base.target.flash)
     -- Camelot's header band sits lower than Forever's: centre the name on it.
     target.name = copy(base.target.name)
     target.name.y = -21.25

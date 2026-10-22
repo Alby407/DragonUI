@@ -324,7 +324,7 @@ function UF.TargetStyle.Create(opts)
         local texture = HealthBar:GetStatusBarTexture()
         if not texture then return end
 
-        if config.classcolor and UnitIsPlayer(unitToken) then
+        if config.classcolor and UnitIsPlayer(unitToken) and UF.GetSkinKey() ~= "camelot" then
             local statusPath = BarTexture("Health-Status")
             if texture:GetTexture() ~= statusPath then
                 texture:SetTexture(statusPath)
