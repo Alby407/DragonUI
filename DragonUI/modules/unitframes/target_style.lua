@@ -1063,9 +1063,12 @@ function UF.TargetStyle.Create(opts)
         local spot = UF.GetFrameSkin()[Kind()].flash
         -- Skins without a threat-flash spot (Camelot) simply leave retail's off.
         if not spot then
+            -- UnitFrame_UpdateThreatIndicator re-shows this texture, so make it invisible.
+            flash:SetAlpha(0)
             flash:Hide()
             return
         end
+        flash:SetAlpha(1)
         flash:SetTexture(spot.file or TEXTURES.THREAT)
         flash:SetTexCoord(0, 376/512, 0, 134/256)
         flash:ClearAllPoints()

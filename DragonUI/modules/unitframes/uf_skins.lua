@@ -466,6 +466,9 @@ do
     }
     target.glows = nil
     target.flash = nil
+    -- Camelot's header band sits lower than Forever's: centre the name on it.
+    target.name = copy(base.target.name)
+    target.name.y = -21.25
     camelot.target = target
 
     UF.SKINS.camelot = camelot
