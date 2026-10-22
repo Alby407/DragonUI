@@ -34,6 +34,13 @@ function NP.gather.PreparePlateForRefresh(plateData, snapshot)
     -- Invalidate gate memos before identity/color/config may change.
     NP.gather.InvalidatePlateGates(plateData)
     local freshName = snapshot.plateName
+    if freshName and plateData.plateName and freshName ~= plateData.plateName then
+        -- A recycled frame can still report the previous occupant on the first
+        -- OnShow refresh; the name guard in PrepareNameplate then keeps the old
+        -- GUID. Drop it once the real name arrives so the plate rebinds to its
+        -- own unit instead of showing the target's level on a mob.
+        NP.state.ClearPlateGUID(plateData)
+    end
     NP.native_style.ResetPlateEliteIfIdentityChanged(plateData, freshName)
     NP.castbar.ResetPlateCastIfIdentityChanged(plateData, freshName)
     NP.gather.ResetPlateDebuffsIfIdentityChanged(plateData, freshName)
