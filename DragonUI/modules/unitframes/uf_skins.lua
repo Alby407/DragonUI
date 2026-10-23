@@ -423,7 +423,7 @@ local function UnitFrameConfig()
 end
 
 -- Camelot: Forever's classic-flavoured frame art from the client's camelot cells.
--- Same three-band layout as Forever, but health and mana wells are nearly equal.
+-- The fills and glows come from the same c60 sheet as these three-band frames.
 do
     local base = UF.SKINS.forever
     local camelot = {}
@@ -448,27 +448,42 @@ do
     local player = copy(base.player)
     player.background = reskin(base.player.background, "Player-BACKGROUND")
     player.border = reskin(base.player.background, "Player-BORDER")
+    -- Art anchors on health's LEFT. Compensate its new position here so the
+    -- portrait ring and frame stay at their existing screen position.
+    player.background.x, player.border.x = -69, -69
+    player.background.y, player.border.y = -26.5, -26.5
     player.bars = {
-        health = { w = 120, h = 16, x = 3.5, y = -3 },
-        mana = { w = 120, h = 11, x = 3.5, y = -16.5 },
+        health = { w = 122, h = 15, x = 5.5, y = -4.5 },
+        mana = { w = 122, h = 10, x = 5.5, y = -18 },
     }
-    -- The Forever glows (status/combat) are cut for the 2:1 HD wells and
-    -- would sit across the Camelot three-band art, so leave them off.
-    player.glows = nil
+    player.name = copy(base.player.name)
+    player.name.y = 9.5
+    local function glow(file)
+        return { file = ART .. "Camelot\\" .. file, w = 256, h = 128,
+                 x = 0, y = 0, tc = FULL_TEXCOORD }
+    end
+    player.glows = { status = glow("Player-Status"), combat = glow("Player-InCombat") }
     camelot.player = player
 
     local target = copy(base.target)
     target.background = reskin(base.target.background, "Target-BACKGROUND")
     target.border = reskin(base.target.background, "Target-BORDER")
+    -- Border is relative to the background, so its canvas starts at (0, 0).
+    target.border.x, target.border.y = 0, 0
     target.bars = {
-        health = { w = 120, h = 16, x = -1.25, y = -3 },
-        mana = { w = 120, h = 11, x = 2.5, y = -16.5 },
+        health = { w = 119, h = 14.5, x = -1.25, y = -3.5 },
+        mana = { w = 119, h = 9, x = -1.25, y = -16.75 },
     }
     target.glows = nil
-    -- Keep Forever's red threat flash; its spot is tuned to the same ring anchor.
-    target.flash = copy(base.target.flash)
+    -- Native c60 contour, registered on the same canvas as the frame art.
+    target.flash = glow("Target-InCombat")
+    target.flash.onBackground = true
     -- Camelot's header band sits lower than Forever's: centre the name on it.
     target.name = copy(base.target.name)
+    -- The header's inner left edge is ~9.5 from this canvas, beyond Forever's
+    -- inherited x=4. Keep padding on both sides when a long name fills its box.
+    target.name.x = 13.5
+    target.name.w = 110
     target.name.y = -21.25
     camelot.target = target
 

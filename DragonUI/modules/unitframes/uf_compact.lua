@@ -81,6 +81,14 @@ for _, style in ipairs({ "dragonui", "forever" }) do
     skin.smallCompact = small
 end
 
+-- Camelot inherits Forever's companion/fat/decoration variants in uf_skins.lua.
+-- Its table is copied before the compact layouts above exist, so explicitly
+-- inherit these variants too. Keep each complete layout (art, bars, PvP and
+-- glows) together instead of combining Camelot bars with a different contour.
+for _, kind in ipairs({ "playerCompact", "playerCompactDecoration", "targetCompact", "smallCompact" }) do
+    UF.SKINS.camelot[kind] = UF.SKINS.forever[kind]
+end
+
 -- The player's fills close at both ends; the target and ToT ones run dark under the ring.
 UF.TEXTURES.compact = {
     BAR_PREFIX = "Interface\\AddOns\\DragonUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-",
@@ -260,6 +268,11 @@ function UF.CompactPlayerName(dragon)
             w, x = w - (start - x), start
         end
     end
+    if forever and justify == "CENTER" then
+        local right = UF.GetFrameSkin().playerCompact.bars.health.w - 4
+        -- Centre on the available header, not the original left-aligned box.
+        point, x, w = "CENTER", (x + right) / 2, math.min(w, right - x)
+    end
     return point, x, y, w, justify
 end
 
@@ -272,7 +285,12 @@ function UF.CompactTargetName(dragon, healthWidth)
         if limit and limit - 4 < w then
             w = limit - 4
         end
-        return "LEFT", 4, 7.5, w, UF.GetNameSpotJustify()
+        local justify = UF.GetNameSpotJustify()
+        if justify == "CENTER" then
+            local right = limit or (healthWidth - 4)
+            return "CENTER", (4 + right) / 2, 7.5, w, justify
+        end
+        return "LEFT", 4, 7.5, w, justify
     end
     -- Centred over the bar, clear of the level (right edge 18 in) and of a dragon's head.
     local left, w = 26, 96

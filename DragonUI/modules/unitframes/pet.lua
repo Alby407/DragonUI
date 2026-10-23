@@ -426,6 +426,7 @@ local function ReplaceBlizzardPetFrame()
         PetName:SetWordWrap(false)
         PetName:SetNonSpaceWrap(false)
         PetName:SetDrawLayer("OVERLAY")
+        UF.ApplyTextStyle(PetName)
     end
     
     -- Position happiness icon

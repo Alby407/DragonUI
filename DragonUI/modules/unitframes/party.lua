@@ -879,8 +879,7 @@ local function ApplyPartyTextVisualStyle(fontString)
     end
 
     fontString:SetTextColor(1, 1, 1, 1)
-    fontString:SetShadowOffset(1, -1)
-    fontString:SetShadowColor(0, 0, 0, 1)
+    UF.ApplyTextStyle(fontString)
 end
 
 local function GetPartyTextFontPath()
@@ -1350,8 +1349,8 @@ local function StylePartyFrames()
            local name = _G[frame:GetName() .. 'Name']
             if name then
                 name:SetFont(UF.DEFAULT_FONT, 10)
-                name:SetShadowOffset(1, -1)
                 name:SetTextColor(1, 0.82, 0, 1) -- Yellow like the rest
+                UF.ApplyTextStyle(name)
 
                 if not InCombatLockdown() then
                     name:ClearAllPoints()

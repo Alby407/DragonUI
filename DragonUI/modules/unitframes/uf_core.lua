@@ -491,3 +491,64 @@ function UF.CreateModule(name)
         elements = {},          -- Created textures/regions (for cleanup and reference)
     }
 end
+
+-- ============================================================================
+-- UNIT FRAME FONT APPEARANCE
+-- Initialize in the existing core file so startup does not depend on loading a
+-- newly added script after /reload.
+-- ============================================================================
+do
+    local texts = setmetatable({}, { __mode = "k" })
+    local outlines = { DEFAULT = true, NONE = true, OUTLINE = true, THICKOUTLINE = true }
+
+    -- Register individual FontStrings, preserving each template's original flags.
+    function UF.ApplyTextStyle(text)
+        if not text then return end
+        local font, size, currentFlags = text:GetFont()
+        if not font or not size then return end
+        local original = texts[text]
+        if not original then
+            original = { flags = currentFlags or "" }
+            texts[text] = original
+        end
+
+        local config = addon.db and addon.db.profile and addon.db.profile.unitframe or {}
+        local outline = outlines[config.text_outline] and config.text_outline or "DEFAULT"
+        local flags = original.flags
+        if outline ~= "DEFAULT" then
+            local selected = {}
+            for flag in string.gmatch(original.flags, "[^,%s]+") do
+                if flag ~= "OUTLINE" and flag ~= "THICKOUTLINE" then
+                    selected[#selected + 1] = flag
+                end
+            end
+            if outline ~= "NONE" then selected[#selected + 1] = outline end
+            flags = table.concat(selected, ",")
+        end
+        if (currentFlags or "") ~= flags then
+            text:SetFont(font, size, flags)
+        end
+
+        local shadow = config.text_shadow ~= false
+        local x, y = text:GetShadowOffset()
+        local wantedX, wantedY = shadow and 1 or 0, shadow and -1 or 0
+        if x ~= wantedX or y ~= wantedY then
+            text:SetShadowOffset(wantedX, wantedY)
+        end
+        local r, g, b, a = text:GetShadowColor()
+        local alpha = shadow and 1 or 0
+        if r ~= 0 or g ~= 0 or b ~= 0 or a ~= alpha then
+            text:SetShadowColor(0, 0, 0, alpha)
+        end
+    end
+
+    function UF.RefreshTextStyles()
+        for text in pairs(texts) do
+            UF.ApplyTextStyle(text)
+        end
+    end
+
+    if type(addon.RefreshConfig) == "function" then
+        hooksecurefunc(addon, "RefreshConfig", UF.RefreshTextStyles)
+    end
+end

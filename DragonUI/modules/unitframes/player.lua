@@ -56,7 +56,7 @@ local PlayerLevelText = _G.PlayerLevelText
 -- Texture paths from shared core (single source of truth)
 local TEXTURES = UF.TEXTURES.player
 
--- Camelot's three-band wells use flat fills; the retail bar art is drawn for 2:1 wells.
+-- Original c60 fills, repacked for Camelot's three-band wells.
 local CAMELOT_BARS = "Interface\\AddOns\\DragonUI\\Textures\\UnitFrames\\Camelot\\"
 
 -- Keep a fixed on-screen border size so higher-resolution replacements
@@ -221,9 +221,9 @@ local DF_POWER_COLORS = {
 
 -- Get the correct power bar texture path, applying user texture override ONLY in fat mode
 local function GetPowerBarTexture(powerTypeString)
-    -- Camelot uses its own flat fills so health and power read as the same bar family.
+    -- Resolve the numeric power ID to the texture suffix (e.g. RunicPower).
     if UF.GetSkinKey() == "camelot" then
-        return CAMELOT_BARS .. "Bar-" .. powerTypeString
+        return CAMELOT_BARS .. "Bar-" .. (UF.POWER_MAP[UnitPowerType('player')] or "Mana")
     end
     -- Override textures only apply when fat healthbar is active
     if IsFatHealthbarActive() then
@@ -279,7 +279,7 @@ local function ApplyFatManaBar()
             PlayerFrameManaBar:SetSize(117, 9)
             PlayerFrameManaBar:SetPoint('TOPLEFT', PlayerFrame, 'TOPLEFT', 114, -58.5)
         else
-            local mana = UF.GetFrameSkin().player.bars.mana
+            local mana = UF.GetFrameSkin()[UF.IsCompact("player") and "playerCompact" or "player"].bars.mana
             PlayerFrameManaBar:SetSize(mana.w, mana.h)
             PlayerFrameManaBar:SetPoint('LEFT', PlayerPortrait, 'RIGHT', mana.x, mana.y)
         end
@@ -1308,8 +1308,8 @@ local function UpdatePlayerHealthBarColor()
         return
     end
 
-    -- Camelot always uses the green Classic health fill, even with class colors on.
-    if config.classcolor and UF.GetSkinKey() ~= "camelot" then
+    -- Class colours use the skin's neutral fill; green is the default when disabled.
+    if config.classcolor then
         --  USE STATUS TEXTURE (WHITE) FOR CLASS COLOR
         local statusTexturePath = UF.GetSkinKey() == "camelot" and CAMELOT_BARS .. "Bar-White" or TEXTURES.HEALTH_STATUS
         if texture:GetTexture() ~= statusTexturePath then
@@ -1824,6 +1824,7 @@ local function UpdatePlayerLevelLayout()
         PlayerLevelText:SetFont(font, onCircle and UF.LEVEL_ART.fontSize or levelTextSize, flags)
     end
     PlayerLevelText:SetDrawLayer('OVERLAY', 7)
+    UF.ApplyTextStyle(PlayerLevelText)
     ApplyPlayerLevelVisibility()
 end
 
@@ -2431,6 +2432,7 @@ local function CreatePlayerFrameTextures()
         text:SetFont(UF.DEFAULT_FONT, 9)
         text:SetShadowOffset(1, -1)
         text:SetShadowColor(0, 0, 0, 1)
+        UF.ApplyTextStyle(text)
 
         groupIndicator.text = text
         groupIndicator.backgroundTexture = bgTexture
@@ -2503,6 +2505,7 @@ local function CreatePlayerFrameTextures()
             text:SetJustifyH(elem.justify)
             dragonFrame[elem.name] = text
         end
+        UF.ApplyTextStyle(dragonFrame[elem.name])
     end
     -- NOTE: UpdatePlayerDragonDecoration() is called at the end of ChangePlayerframe()
     -- to ensure all bar/portrait positioning is done before decoration is applied
@@ -2626,7 +2629,11 @@ local function ChangePlayerframe()
         elseif foreverName then
             PlayerName:SetJustifyH(UF.GetNameSpotJustify())
             PlayerName:SetWidth(foreverName.w)
-            PlayerName:SetPoint('LEFT', PlayerFrameHealthBar, 'TOPLEFT', foreverName.x, foreverName.y)
+            if UF.GetNameSpotJustify() == "CENTER" then
+                PlayerName:SetPoint('CENTER', PlayerFrameHealthBar, 'TOP', 0, foreverName.y)
+            else
+                PlayerName:SetPoint('LEFT', PlayerFrameHealthBar, 'TOPLEFT', foreverName.x, foreverName.y)
+            end
         elseif isPlayerEliteMode then
             -- Decoration: name centred over the health bar; 90 wide keeps it off the role icon.
             PlayerName:SetJustifyH("CENTER")
@@ -2643,6 +2650,7 @@ local function ChangePlayerframe()
     -- Force name visible — Blizzard vehicle transition can hide it
     PlayerName:SetAlpha(1)
     PlayerName:Show()
+    UF.ApplyTextStyle(PlayerName)
 
     UpdatePlayerLevelLayout()
     ApplyPlayerLevelVisibility()

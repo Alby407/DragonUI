@@ -430,6 +430,7 @@ local function ReskinBossFrame(wrapperFrame, bossFrame, bossIndex)
         nameText:ClearAllPoints()
         nameText:SetPoint("BOTTOM", healthBar, "TOP", 4, 3)
         nameText:SetDrawLayer("OVERLAY", 2)
+        UF.ApplyTextStyle(nameText)
     end
 
     -- ---- Level text ----
@@ -438,6 +439,7 @@ local function ReskinBossFrame(wrapperFrame, bossFrame, bossIndex)
         levelText:ClearAllPoints()
         levelText:SetPoint("BOTTOMRIGHT", healthBar, "TOPLEFT", 18, 3)
         levelText:SetDrawLayer("OVERLAY", 2)
+        UF.ApplyTextStyle(levelText)
     end
 
     -- High level icon (skull)
@@ -454,6 +456,7 @@ local function ReskinBossFrame(wrapperFrame, bossFrame, bossIndex)
         healthText:ClearAllPoints()
         healthText:SetPoint("CENTER", healthBar, "CENTER", 0, 0)
         healthText:SetDrawLayer("OVERLAY")
+        UF.ApplyTextStyle(healthText)
     end
 
     -- Dead text
@@ -462,6 +465,7 @@ local function ReskinBossFrame(wrapperFrame, bossFrame, bossIndex)
         deadText:ClearAllPoints()
         deadText:SetPoint("CENTER", healthBar, "CENTER", 0, 0)
         deadText:SetDrawLayer("OVERLAY")
+        UF.ApplyTextStyle(deadText)
     end
 
     -- Mana text
@@ -470,6 +474,7 @@ local function ReskinBossFrame(wrapperFrame, bossFrame, bossIndex)
         manaText:ClearAllPoints()
         manaText:SetPoint("CENTER", manaBar, "CENTER", 0, 0)
         manaText:SetDrawLayer("OVERLAY")
+        UF.ApplyTextStyle(manaText)
     end
 
     -- PVP icon

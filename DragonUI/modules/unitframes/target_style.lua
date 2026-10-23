@@ -87,8 +87,7 @@ function UF.TargetStyle.Create(opts)
         return UF.IsCompact(configKey) and UF.TEXTURES.compact.BAR_PREFIX or TEXTURES.BAR_PREFIX
     end
 
-    -- Camelot's wells are the player frame's size and style, so it uses the player
-    -- bar fills instead of the 2:1 target art (whose borders squash at 16/11).
+    -- Camelot uses the original c60 fills fitted to its three-band wells.
     local function BarTexture(powerName)
         if UF.GetSkinKey() == "camelot" then
             if powerName == "Health" then
@@ -324,7 +323,7 @@ function UF.TargetStyle.Create(opts)
         local texture = HealthBar:GetStatusBarTexture()
         if not texture then return end
 
-        if config.classcolor and UnitIsPlayer(unitToken) and UF.GetSkinKey() ~= "camelot" then
+        if config.classcolor and UnitIsPlayer(unitToken) then
             local statusPath = BarTexture("Health-Status")
             if texture:GetTexture() ~= statusPath then
                 texture:SetTexture(statusPath)
@@ -389,6 +388,20 @@ function UF.TargetStyle.Create(opts)
         Portrait:SetPoint("TOPRIGHT", BlizzFrame, "TOPRIGHT", layout.x, layout.y)
     end
 
+    local function ApplyPowerTextLayout()
+        local rightText = BlizzFrame[namePrefix .. "FrameManaTextRight"]
+        if not rightText or not ManaBar then return end
+        -- Camelot's wells share their right edge. The other skins keep the
+        -- extra inset that compensates for their longer power bar.
+        local offset = -13
+        if UF.GetSkinKey() == "camelot" then
+            local bars = UF.GetFrameSkin()[Kind()].bars
+            offset = -6 + bars.health.x - bars.mana.x
+        end
+        rightText:ClearAllPoints()
+        rightText:SetPoint("RIGHT", ManaBar, "RIGHT", offset, 0)
+    end
+
     -- Bars anchor to the portrait, so both go together; the dragons and the PvP badge follow it too.
     local function ApplyBarsLayout()
         local skin = UF.GetFrameSkin()[Kind()]
@@ -401,6 +414,7 @@ function UF.TargetStyle.Create(opts)
         if ManaBar then
             ApplyBarLayout(ManaBar, skin.bars.mana)
         end
+        ApplyPowerTextLayout()
         Module.appliedLayout = skin
     end
 
@@ -439,6 +453,7 @@ function UF.TargetStyle.Create(opts)
                 nameHome = nil
             end
         end
+        UF.ApplyTextStyle(NameText)
     end
 
     local function ApplyLevelLayout()
@@ -466,6 +481,7 @@ function UF.TargetStyle.Create(opts)
             if font then
                 LevelText:SetFont(font, onCircle and UF.LEVEL_ART.fontSize or opts.levelFontSize or levelTextSize, flags)
             end
+            UF.ApplyTextStyle(LevelText)
         end
         if HighLevelTexture and HealthBar then
             if not skullHome then
@@ -1085,10 +1101,14 @@ function UF.TargetStyle.Create(opts)
         end
         flash:SetAlpha(1)
         flash:SetTexture(spot.file or TEXTURES.THREAT)
-        flash:SetTexCoord(0, 376/512, 0, 134/256)
+        flash:SetTexCoord(unpack(spot.tc or { 0, 376/512, 0, 134/256 }))
         flash:ClearAllPoints()
-        flash:SetPoint("BOTTOMLEFT", BlizzFrame, "BOTTOMLEFT", spot.x, spot.y)
-        flash:SetSize(188, 67)
+        if spot.onBackground then
+            flash:SetPoint("TOPLEFT", frameElements.background, "TOPLEFT", spot.x, spot.y)
+        else
+            flash:SetPoint("BOTTOMLEFT", BlizzFrame, "BOTTOMLEFT", spot.x, spot.y)
+        end
+        flash:SetSize(spot.w or 188, spot.h or 67)
     end
 
     -- ================================================================
@@ -1227,6 +1247,7 @@ function UF.TargetStyle.Create(opts)
             numeric.text:SetPoint("CENTER", 0, 1)
             numeric.text:SetFont(UF.DEFAULT_FONT, 10)
             numeric.text:SetShadowOffset(1, -1)
+            UF.ApplyTextStyle(numeric.text)
 
             frameElements.threatNumeric = numeric
         end
@@ -1515,6 +1536,7 @@ function UF.TargetStyle.Create(opts)
                     configKey, unitToken, BlizzFrame, HealthBar,
                     ManaBar, namePrefix .. "Frame")
             end
+            ApplyPowerTextLayout()
 
             if UnitExists(unitToken) then
                 if opts.forceLayoutOnUnitChange then
@@ -1692,6 +1714,7 @@ function UF.TargetStyle.Create(opts)
                 and not InCombatLockdown() then
             ApplyBarsLayout()
         end
+        ApplyPowerTextLayout()
 
         ApplyWidgetPosition()
 

@@ -618,6 +618,7 @@ function UF.SmallFrame.Create(opts)
             frames.nameText:SetTextColor(1.0, 0.82, 0.0, 1.0)
             frames.nameText:SetDrawLayer("BORDER", 1)
             frames.nameText:SetJustifyH("LEFT")
+            UF.ApplyTextStyle(frames.nameText)
         end
         ApplyBarsLayout()
 

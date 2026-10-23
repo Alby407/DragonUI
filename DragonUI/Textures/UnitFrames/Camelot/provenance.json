@@ -1,0 +1,95 @@
+{
+  "source": "Local WoW Forever wowf; uiunitframe2xc60",
+  "fileDataID": 8036209,
+  "sha256": "0e6b0c85da8e927cc440cd045413dfa50f53d21dc5f9c9a9fad80debb2497167",
+  "barAtlasRectangles": {
+    "Energy": [
+      883,
+      357,
+      248,
+      20
+    ],
+    "Health": [
+      629,
+      357,
+      248,
+      40
+    ],
+    "Rage": [
+      1405,
+      381,
+      248,
+      20
+    ],
+    "Focus": [
+      883,
+      379,
+      248,
+      20
+    ],
+    "RunicPower": [
+      1655,
+      359,
+      248,
+      20
+    ],
+    "White": [
+      883,
+      315,
+      248,
+      40
+    ],
+    "Mana": [
+      1675,
+      337,
+      248,
+      20
+    ]
+  },
+  "glowAtlasRectangles": {
+    "InCombat": [
+      1179,
+      171,
+      384,
+      134
+    ],
+    "Status": [
+      1565,
+      171,
+      384,
+      134
+    ]
+  },
+  "note": "Original c60 artwork; bars trimmed to visible alpha bounds and resampled to 256x32 for 3.3.5a. Glows registered to existing Camelot frame canvases.",
+  "borderWellCutouts": {
+    "Player": [
+      [
+        138,
+        60,
+        382,
+        90
+      ],
+      [
+        138,
+        92,
+        382,
+        112
+      ]
+    ],
+    "Target": [
+      [
+        19,
+        63,
+        258,
+        92
+      ],
+      [
+        19,
+        95,
+        258,
+        113
+      ]
+    ]
+  },
+  "borderNote": "Existing border-only exports retained brown well artwork from luminance-based extraction. Alpha is cleared inside the health/power fill rectangles; frame outlines, background art, fill textures and glow textures are unchanged."
+}

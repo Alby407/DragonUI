@@ -48,6 +48,14 @@ were obtained via. They are credited as conduits, not as the authors of the art.
 | `WorldMap/` | see [World map artwork](#world-map-artwork) |
 | `XP/` | DragonflightUI; `uiexperiencebar.blp` via pretty_actionbar / RetailUI |
 
+`UnitFrames/Camelot/Bar-Health`, `Bar-White`, `Bar-Mana`, `Bar-Rage`, `Bar-Energy`,
+`Bar-Focus`, `Bar-RunicPower`, `Player-InCombat`, `Player-Status`, `Target-InCombat`
+and `Target-Status` are repacked from the local WoW Forever `uiunitframe2xc60`
+sheet (FileDataID 8036209). The bar fills retain the original artwork, with
+transparent padding removed before resampling. The glow cells are registered
+to the existing Camelot frame canvases. Source hashes and atlas rectangles are
+recorded in `UnitFrames/Camelot/provenance.json`.
+
 Data tables generated from the World of Warcraft client's database (DBC) files are game data
 © Blizzard Entertainment and are not covered by DragonUI's MIT License:
 `DragonUI/modules/worldmap/fogdata.lua`, `entrancedata.lua`, `flightpointdata.lua`,

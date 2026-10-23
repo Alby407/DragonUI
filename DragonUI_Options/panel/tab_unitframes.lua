@@ -1012,6 +1012,24 @@ local function BuildUnitframesTab(scroll)
         callback = refreshSkins,
     })
     AddPortraitOffAllToggle(style)
+    C:AddDropdown(style, {
+        label = LO["Font Outline"],
+        desc = LO["Outline on unit names, levels, health and power values. Default keeps each frame's original font style."],
+        dbPath = "unitframe.text_outline",
+        values = {
+            DEFAULT = LO["Default Font Style"],
+            NONE = LO["No Outline"],
+            OUTLINE = LO["Thin Outline"],
+            THICKOUTLINE = LO["Thick Outline"],
+        },
+        callback = function() addon.UF.RefreshTextStyles() end,
+    })
+    C:AddToggle(style, {
+        label = LO["Text Shadow"],
+        desc = LO["Black shadow behind unit names, levels, health and power values."],
+        dbPath = "unitframe.text_shadow",
+        callback = function() addon.UF.RefreshTextStyles() end,
+    })
     if centerNamesListed then
         C:AddToggle(style, {
             label = LO["Center Names"],

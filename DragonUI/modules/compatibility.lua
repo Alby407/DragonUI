@@ -5,6 +5,34 @@ local compatibility = {}
 addon.compatibility = compatibility
 local L = addon.L
 
+-- 3.3.5a DebugTools passes its optional debuglocals result straight to %s.
+-- A missing dump makes the error viewer recurse through the active error
+-- handler. Supply an empty dump without changing messages, stacks or handlers.
+do
+    local function FixScriptErrorLocals()
+        local frame = _G.ScriptErrorsFrame
+        if not frame or type(frame.locals) ~= "table" then return false end
+        if not getmetatable(frame.locals) then
+            setmetatable(frame.locals, {
+                __index = function(_, index)
+                    if type(index) == "number" then return "" end
+                end,
+            })
+        end
+        return true
+    end
+
+    if not FixScriptErrorLocals() then
+        local watcher = CreateFrame("Frame")
+        watcher:RegisterEvent("ADDON_LOADED")
+        watcher:SetScript("OnEvent", function(self, _, name)
+            if name == "Blizzard_DebugTools" and FixScriptErrorLocals() then
+                self:UnregisterEvent("ADDON_LOADED")
+            end
+        end)
+    end
+end
+
 --[[
 * DragonUI Compatibility Manager
 * 

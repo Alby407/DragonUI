@@ -174,6 +174,9 @@ function TextSystem.CreateDualTextElements(parentFrame, barFrame, prefix, layer,
         elements.right = rightText
     end
 
+    for _, suffix in ipairs({ "Text", "TextLeft", "TextRight" }) do
+        addon.UF.ApplyTextStyle(parentFrame[prefix .. suffix])
+    end
     return elements
 end
 

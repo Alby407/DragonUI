@@ -1311,6 +1311,17 @@ local function CompressAndSortBagGroups(bags)
     end
 end
 
+local function CompressAndSortBankBags()
+    if IsBankFillFromBagsEnabled() then
+        local fillBags = {}
+        for _, bag in ipairs(PLAYER_BAGS) do
+            if bag ~= KEYRING_CONTAINER then tinsert(fillBags, bag) end
+        end
+        StackBagsAcross(fillBags, BANK_BAGS)
+    end
+    CompressAndSortBagGroups(BANK_BAGS)
+end
+
 -- Move execution frame
 local moveFrame = CreateFrame("Frame")
 local moveTimer = 0
@@ -1327,7 +1338,7 @@ local current_source_expected_id, current_source_expected_count
 local current_source_initial_count, current_target_initial_count
 local current_target_attempted = false
 local current_action_wait = 0
-local MOVE_UPDATE_WAIT = 1.0
+local MOVE_UPDATE_WAIT = 1.25
 local sortContext
 local replanAttempts = 0
 local MAX_REPLAN_ATTEMPTS = 4
@@ -1357,7 +1368,10 @@ local idleCursorTime = 0
 
 local function CursorItemID()
     if not CursorHasItem() then return nil end
-    local cursorType, _, cursorLink = GetCursorInfo()
+    local cursorType, cursorID, cursorLink = GetCursorInfo()
+    -- The 3.3.5 API supplies the item ID independently of the hyperlink.
+    -- Like ElvUI, use that ID even while the link is not available yet.
+    if cursorType == "item" and type(cursorID) == "number" then return cursorID end
     -- Right after a Pickup the cursor flag can be set a frame before
     -- GetCursorInfo() returns the link. Report "unknown" (false) instead
     -- of nil so callers wait instead of aborting with a false mismatch.
@@ -1426,7 +1440,7 @@ end
 moveFrame:SetScript("OnUpdate", function(self, elapsed)
     sortStallTime = sortStallTime + elapsed
     if sortStallTime >= SORT_STALL_TIMEOUT then
-        if sortContext == "bags" and not CursorHasItem() and ReplanSorting and ReplanSorting() then
+        if not CursorHasItem() and ReplanSorting and ReplanSorting() then
             return
         end
         if CursorHasItem() then
@@ -1510,7 +1524,7 @@ moveFrame:SetScript("OnUpdate", function(self, elapsed)
                         -- target while its bag update catches up.
                         if current_target_attempted and current_action_wait < MOVE_UPDATE_WAIT then return end
                         if current_target_attempted
-                            and (target_count ~= current_target_initial_count
+                            and ((target_count or 0) ~= current_target_initial_count
                                 or link_to_id(BagGetItemLink(target_bag, target_slot)) ~= current_target_itemid)
                         then return end
                         -- Clicking: respect pickup spacing.
@@ -1536,7 +1550,7 @@ moveFrame:SetScript("OnUpdate", function(self, elapsed)
             local _, target_count, target_locked = BagGetItemInfo(target_bag, target_slot)
             if not source_locked and not target_locked
                 and source_count == current_source_initial_count
-                and target_count == current_target_initial_count
+                and (target_count or 0) == current_target_initial_count
                 and link_to_id(BagGetItemLink(current_source_bag, current_source_slot)) == current_id
                 and link_to_id(BagGetItemLink(target_bag, target_slot)) == current_target_itemid
                 and moveTimer >= interval
@@ -1553,7 +1567,14 @@ moveFrame:SetScript("OnUpdate", function(self, elapsed)
                 end
             end
         end
-        if not current_target_attempted then return end
+        -- A rejected pickup, a cancelled cursor or an unexpected stack update
+        -- can leave neither the initial nor the predicted state. Do not wait
+        -- forever for that prediction: rebuild from the live, unlocked bags.
+        -- ReplanSorting also checks GetCursorInfo before discarding the move.
+        if not current_target_attempted then
+            if current_action_wait >= MOVE_UPDATE_WAIT and ReplanSorting then ReplanSorting() end
+            return
+        end
 
         -- Wait for the complete destination update before allowing another
         -- move. The count check matters for partial-stack moves where the
@@ -1568,14 +1589,7 @@ moveFrame:SetScript("OnUpdate", function(self, elapsed)
                 link_to_id(BagGetItemLink(current_source_bag, current_source_slot)) ~= current_source_expected_id
                 or (current_source_expected_id and confirmed_source_count ~= current_source_expected_count)))
         then
-            if sortContext == "bags" and current_action_wait >= 2
-                and not source_locked and not target_locked
-                and (confirmed_target_id ~= current_target_itemid
-                    or confirmed_target_count ~= current_target_initial_count)
-                and ReplanSorting and ReplanSorting()
-            then
-                return
-            end
+            if current_action_wait >= MOVE_UPDATE_WAIT and ReplanSorting then ReplanSorting() end
             return
         end
 
@@ -1613,6 +1627,7 @@ moveFrame:SetScript("OnUpdate", function(self, elapsed)
             local source_link = BagGetItemLink(source_bag, source_slot)
             local source_itemid = link_to_id(source_link)
             if not source_itemid then
+                if ReplanSorting and ReplanSorting() then return end
                 StopSorting("DragonUI: Sort confused, stopping.")
                 return
             end
@@ -1638,7 +1653,7 @@ moveFrame:SetScript("OnUpdate", function(self, elapsed)
             current_return_attempted = false
             current_displaced_id = nil
             current_source_initial_count = source_count
-            current_target_initial_count = target_count
+            current_target_initial_count = target_count or 0
             current_target_attempted = false
             current_action_wait = 0
             cursorMismatchTime = 0
@@ -1765,7 +1780,9 @@ local function StartSorting()
 end
 
 ReplanSorting = function()
-    if sortContext ~= "bags" or replanAttempts >= MAX_REPLAN_ATTEMPTS or CursorHasItem() then
+    if (sortContext ~= "bags" and sortContext ~= "bank")
+        or replanAttempts >= MAX_REPLAN_ATTEMPTS or CursorHasItem()
+    then
         return false
     end
     -- CursorHasItem can briefly lag GetCursorInfo; never replan while an
@@ -1773,12 +1790,13 @@ ReplanSorting = function()
     local cursorType = GetCursorInfo()
     if cursorType == "item" then return false end
 
-    if current_target then
-        if not current_target_attempted then return false end
-        local target_bag, target_slot = decode_bagslot(current_target)
-        local _, _, source_locked = BagGetItemInfo(current_source_bag, current_source_slot)
-        local _, _, target_locked = BagGetItemInfo(target_bag, target_slot)
-        if source_locked or target_locked then return false end
+    -- Never build a new queue from a half-replicated move. Check the whole
+    -- relevant inventory, not just the last source and destination.
+    if sortContext == "bank" and not bank_open then return false end
+    local scanBags = sortContext == "bank" and ALL_BAGS or PLAYER_BAGS
+    for bag, slot in IterateBags(scanBags) do
+        local _, _, locked = BagGetItemInfo(bag, slot)
+        if locked then return false end
     end
 
     replanAttempts = replanAttempts + 1
@@ -1788,9 +1806,17 @@ ReplanSorting = function()
     wipe(bag_stacks)
     wipe(bag_maxstacks)
     wipe(item_cache)
-    ScanBags(ALL_BAGS)
-    CompressAndSortBagGroups(PLAYER_BAGS)
+    ScanBags(scanBags)
+    if sortContext == "bank" then
+        CompressAndSortBankBags()
+    else
+        CompressAndSortBagGroups(PLAYER_BAGS)
+    end
     StartSorting()
+    if #moves == 0 then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00cc66DragonUI:|r " .. T("Sort complete.", "Sort complete."), 0.4, 1, 0.4)
+        StopSorting()
+    end
     return true
 end
 
@@ -1834,7 +1860,8 @@ local function SortBankBags()
     end
 
     ScanBags(ALL_BAGS)
-    sortContext = nil
+    sortContext = "bank"
+    replanAttempts = 0
 
     -- Debug: print what ScanBags found for bank items
     if addon.debugMode then
@@ -1857,16 +1884,7 @@ local function SortBankBags()
         end
     end
 
-    if IsBankFillFromBagsEnabled() then
-        local fillBags = {}
-        for _, bag in ipairs(PLAYER_BAGS) do
-            if bag ~= KEYRING_CONTAINER then
-                tinsert(fillBags, bag)
-            end
-        end
-        StackBagsAcross(fillBags, BANK_BAGS)
-    end
-    CompressAndSortBagGroups(BANK_BAGS)
+    CompressAndSortBankBags()
 
     -- Debug: print sorted order and moves
     if addon.debugMode then
